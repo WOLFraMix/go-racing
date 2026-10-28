@@ -24,19 +24,28 @@ const (
 	laneWidth = roadW / laneCount // ~67
 )
 
+const (
+	playerYBase  = screenHeight - carH - 30 // «нейтральная» позиция
+	playerYMax   = screenHeight - carH - 10 // дальше вниз нельзя — упираемся в низ экрана
+	playerYMin   = int(screenHeight * 0.45) // дальше вверх нельзя — ниже середины экрана
+	playerYReach = 22.0                     // сколько пикселей смещения даёт 1.0 boost
+	playerYEase  = 0.06                     // плавность приближения к целевой позиции
+)
+
 type Game struct {
-	player      Car
-	enemies     []Car
-	particles   []Particle
-	sprites     map[CarKind]*Sprite
-	scrollSpeed float64
-	boost       float64
-	spawnTimer  float64
-	markOffset  float64
-	frame       int
-	gameOver    bool
-	score       int
-	highScore   int
+	player        Car
+	enemies       []Car
+	particles     []Particle
+	sprites       map[CarKind]*Sprite
+	scrollSpeed   float64
+	boost         float64
+	spawnTimer    float64
+	markOffset    float64
+	frame         int
+	gameOver      bool
+	score         int
+	highScore     int
+	playerBraking bool
 }
 
 func NewGame() *Game {
@@ -62,7 +71,7 @@ func (g *Game) loadSprites() {
 func (g *Game) reset() {
 	g.player = Car{
 		X:    laneCenterX(3, carW),
-		Y:    float64(screenHeight - carH - 30),
+		Y:    float64(playerYBase),
 		W:    carW,
 		H:    carH,
 		Kind: KindPlayer,
@@ -158,6 +167,19 @@ func (g *Game) Update() error {
 		g.boost = -brakeMax
 	}
 
+	// стоп-сигналы игрока: мгновенно при нажатии тормоза
+	g.playerBraking = down && !up
+
+	// вертикальное положение игрока: разгон — вперёд (вверх), торможение — назад (вниз)
+	targetY := float64(playerYBase) - g.boost*playerYReach
+	if targetY < float64(playerYMin) {
+		targetY = float64(playerYMin)
+	}
+	if targetY > float64(playerYMax) {
+		targetY = float64(playerYMax)
+	}
+	g.player.Y += (targetY - g.player.Y) * playerYEase
+
 	// движение игрока влево-вправо
 	move := 0.0
 	if ebiten.IsKeyPressed(ebiten.KeyLeft) || ebiten.IsKeyPressed(ebiten.KeyA) {
@@ -237,7 +259,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	for _, e := range g.enemies {
 		drawCar(screen, e, g.sprites[e.Kind])
 		drawBlinker(screen, e, e.Blink, g.frame)
-		drawBrakeLights(screen, e, e.Braking)
+		drawBrakeLights(screen, g.player, g.playerBraking)
 	}
 	drawCar(screen, g.player, g.sprites[KindPlayer])
 	// стопы игрока — при торможении стрелками

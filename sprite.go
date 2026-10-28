@@ -77,23 +77,36 @@ func drawBlinker(dst *ebiten.Image, c Car, blink, frame int) {
 // drawBrakeLights — красные стоп-сигналы у заднего бампера.
 // Тусклые габариты горят всегда, яркие стопы — при торможении.
 func drawBrakeLights(dst *ebiten.Image, c Car, braking bool) {
-	dim := color.RGBA{R: 120, G: 20, B: 20, A: 255}
-	hot := color.RGBA{R: 255, G: 40, B: 40, A: 255}
+	dim := color.RGBA{R: 100, G: 10, B: 10, A: 255} // габариты
+	hot := color.RGBA{R: 255, G: 30, B: 30, A: 255} // стопы: насыщенный красный
 
-	// размеры и координаты считаем в float64, конвертируем в конце
-	w, h := 8.0, 6.0
-	y := c.Y + c.H - h - 2 // у заднего бампера
-	lx := c.X + 3
-	rx := c.X + c.W - w - 3
+	w, h := 9.0, 7.0 // чуть крупнее, чем раньше (8×6)
+	y := c.Y + c.H - h - 2
+	lx := c.X + 2
+	rx := c.X + c.W - w - 2
 
+	// габариты
 	lf, rf := float32(lx), float32(rx)
 	yy, ww, hh := float32(y), float32(w), float32(h)
-
 	vector.FillRect(dst, lf, yy, ww, hh, dim, false)
 	vector.FillRect(dst, rf, yy, ww, hh, dim, false)
+
 	if braking {
+		// тёмная «подложка» — рамка, чтобы стопы читались на любом цвете кузова
+		bg := color.RGBA{R: 40, G: 0, B: 0, A: 255}
+		vector.FillRect(dst, lf-1, yy-1, ww+2, hh+2, bg, false)
+		vector.FillRect(dst, rf-1, yy-1, ww+2, hh+2, bg, false)
+		// яркие стопы
 		vector.FillRect(dst, lf, yy, ww, hh, hot, false)
 		vector.FillRect(dst, rf, yy, ww, hh, hot, false)
+		// белое ядро в центре каждой лампы — эффект раскалённой нити
+		coreW, coreH := w*0.4, h*0.4
+		cx1 := lx + (w-coreW)/2
+		cx2 := rx + (w-coreW)/2
+		cy := y + (h-coreH)/2
+		core := color.RGBA{R: 255, G: 170, B: 160, A: 255}
+		vector.FillRect(dst, float32(cx1), float32(cy), float32(coreW), float32(coreH), core, false)
+		vector.FillRect(dst, float32(cx2), float32(cy), float32(coreW), float32(coreH), core, false)
 	}
 }
 
