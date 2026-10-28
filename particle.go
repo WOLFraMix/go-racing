@@ -14,12 +14,12 @@ type Particle struct {
 	Col                color.RGBA
 }
 
-func (g *Game) updateParticles() {
+func (g *Game) updateParticles(dt float64) {
 	alive := g.particles[:0]
 	for _, p := range g.particles {
-		p.Life -= 0.02
-		p.X += p.Vx
-		p.Y += p.Vy
+		p.Life -= 0.02 * dt
+		p.X += p.Vx * dt
+		p.Y += p.Vy * dt
 		if p.Life > 0 {
 			alive = append(alive, p)
 		}

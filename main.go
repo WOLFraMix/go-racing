@@ -3,7 +3,7 @@ package main
 import "github.com/hajimehoshi/ebiten/v2"
 
 func main() {
-	ebiten.SetWindowSize(screenWidth, screenHeight+40) // +40 под рамку окна ОС
+	ebiten.SetWindowSize(screenWidth, screenHeight+40)
 	ebiten.SetWindowTitle("Go Racing Mini — Ebitengine")
 
 	g := NewGame()

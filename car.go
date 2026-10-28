@@ -6,28 +6,25 @@ import (
 )
 
 const (
-	carW = laneWidth - 14 // 53 — почти во всю полосу
+	carW = laneWidth - 14
 	carH = 76
 	busH = 100
 
-	truckW = laneWidth - 16 // фура чуть уже — остаётся зазор для манёвра
+	truckW = laneWidth - 16
 	truckH = 130
 
 	playerSpeed = 6.0
-
-	startSpeed = 3.0
-	maxSpeed   = 6.0
 
 	boostMax  = 2.2
 	brakeMax  = 1.6
 	boostGain = 0.05
 	brakeGain = 0.07
 
-	laneChangeSpeed = 1.3 // скорость бокового смещения при перестроении
-	safeGap         = 70  // дистанция, на которой ИИ начинает маневрировать
-	changeCooldown  = 150 // кадров между перестроениями одной машины
+	laneChangeSpeed = 1.3 // плавное перестроение
+	safeGap         = 70
+	changeCooldown  = 150
 
-	randomLaneChance = 0.001 // шанс спонтанного перестроения за кадр
+	randomLaneChance = 0.001
 )
 
 type CarKind int
@@ -46,14 +43,15 @@ const (
 type Car struct {
 	X, Y, W, H float64
 	Kind       CarKind
-	OwnSpeed   float64 // текущая скорость (может меняться ИИ)
-	BaseOwn    float64 // «крейсерская» скорость, к которой ИИ возвращается
-	Lane       int     // текущая полоса
-	TargetLane int     // полоса, в которую перестраивается
-	Blink      int     // поворотник: -1 влево, 0 нет, +1 вправо
-	BlinkTimer int     // сколько ещё кадров мигать после завершения манёвра
-	Cooldown   int     // анти-дребезг между перестроениями
-	Braking    bool    // стоп-сигналы горят
+	OwnSpeed   float64
+	BaseOwn    float64
+	Lane       int
+	TargetLane int
+	Blink      int
+	BlinkTimer float64
+	Cooldown   float64
+	Braking    bool
+	NearMiss   bool
 	Points     int
 }
 
@@ -62,9 +60,8 @@ func randomSpeed(base float64) float64 {
 	return base * (0.8 + rand.Float64()*0.4)
 }
 
-// tryLaneChange — общая логика попытки перестроения для ИИ:
-// выбирает случайную сторону, проверяет свободность, включает поворотник.
-// Возвращает true, если манёвр начат.
+// tryLaneChange — попытка перестроения: случайная сторона, проверка
+// свободности, поворотник и кулдаун. Возвращает true, если манёвр начат.
 func (g *Game) tryLaneChange(e *Car, selfIdx int) bool {
 	dir := 0
 	if rand.Intn(2) == 0 {
@@ -89,38 +86,37 @@ func (g *Game) tryLaneChange(e *Car, selfIdx int) bool {
 	return true
 }
 
-// RandomEnemy — создаёт случайную машину в заданной полосе.
 func RandomEnemy(lane int) Car {
 	kind := KindSedan
 	w, h := float64(carW), float64(carH)
 	points := 1
-	base := 1.0 + rand.Float64()*0.7 // седан/SUV: 1.0–1.7
+	base := 1.0 + rand.Float64()*0.7
 
 	switch r := rand.Float64(); {
-	case r < 0.12: // спортивная: быстрая, 2 очка
+	case r < 0.12:
 		kind = KindSport
 		points = 2
 		base = 2.1 + rand.Float64()*0.6
-	case r < 0.26: // фура: медленная и длинная, 3 очка
+	case r < 0.26:
 		kind = KindTruck
 		w = float64(truckW)
 		h = float64(truckH)
 		points = 3
 		base = 0.4 + rand.Float64()*0.4
-	case r < 0.38: // маршрутка: 2 очка
+	case r < 0.38:
 		kind = KindMinibus
 		points = 2
 		base = 0.7 + rand.Float64()*0.3
-	case r < 0.48: // автобус: длинный, 3 очка
+	case r < 0.48:
 		kind = KindBus
 		h = float64(busH)
 		points = 3
 		base = 0.5 + rand.Float64()*0.3
-	case r < 0.55: // скорая: быстрая, 4 очка
+	case r < 0.55:
 		kind = KindAmbulance
 		points = 4
 		base = 1.9 + rand.Float64()*0.5
-	case r < 0.67: // внедорожник: характеристики как у седана
+	case r < 0.67:
 		kind = KindSUV
 	}
 
@@ -162,8 +158,6 @@ func hit(a, b Car) bool {
 		a.Y+a.H-m > b.Y+m
 }
 
-// laneFreeFor — можно ли перестроиться в полосу: проверяем всех врагов
-// (кроме самой машины по индексу selfIdx) и игрока. Требуем зазор 30px.
 func (g *Game) laneFreeFor(e Car, selfIdx, lane int) bool {
 	if lane < 0 || lane >= laneCount {
 		return false
@@ -189,8 +183,6 @@ func (g *Game) laneFreeFor(e Car, selfIdx, lane int) bool {
 	return true
 }
 
-// leaderInfo — ближайшая машина впереди в той же полосе. Возвращает индекс
-// врага (-1, если лидер — игрок или никого), зазор и флаг «лидер — игрок».
 func (g *Game) leaderInfo(e Car) (idx int, gap float64, isPlayer bool) {
 	lane := laneOfX(e.X + e.W/2)
 	lx := float64(roadX0 + lane*laneWidth)
@@ -207,7 +199,7 @@ func (g *Game) leaderInfo(e Car) (idx int, gap float64, isPlayer bool) {
 		}
 		tail := o.Y + o.H
 		if tail > e.Y-1 {
-			continue // не впереди
+			continue
 		}
 		gapHere := e.Y - tail
 		if gapHere < bestGap {
@@ -235,10 +227,9 @@ func (g *Game) leaderInfo(e Car) (idx int, gap float64, isPlayer bool) {
 	return idx, bestGap, isPlayer
 }
 
-// updateEnemies — ИИ (перестроения, поворотники, торможение), перемещение
-// и страховка от наездов врага на врага.
-func (g *Game) updateEnemies(eff float64) {
-	// ИИ
+// updateEnemies — ИИ, перемещение и страховка от наездов. Все константы —
+// «за кадр при 60 FPS», умножаются на dt.
+func (g *Game) updateEnemies(eff, dt float64) {
 	for i := range g.enemies {
 		e := &g.enemies[i]
 
@@ -246,27 +237,28 @@ func (g *Game) updateEnemies(eff float64) {
 		if e.TargetLane != e.Lane {
 			tx := laneCenterX(e.TargetLane, e.W)
 			dx := tx - e.X
-			if math.Abs(dx) <= laneChangeSpeed {
+			step := laneChangeSpeed * dt
+			if math.Abs(dx) <= step {
 				e.X = tx
 				e.Lane = e.TargetLane
-				e.BlinkTimer = 24 // ~2 полные вспышки после манёвра
+				e.BlinkTimer = 24
 				e.Cooldown = changeCooldown
 			} else if dx > 0 {
-				e.X += laneChangeSpeed
+				e.X += step
 			} else {
-				e.X -= laneChangeSpeed
+				e.X -= step
 			}
+			e.Braking = false
 		} else if e.BlinkTimer > 0 {
-			e.BlinkTimer--
+			e.BlinkTimer -= dt
 			if e.BlinkTimer <= 0 {
 				e.Blink = 0
 			}
 		}
 		if e.Cooldown > 0 {
-			e.Cooldown--
+			e.Cooldown -= dt
 		}
 
-		// решение принимаем только вне манёвра и вне кулдауна
 		if e.TargetLane != e.Lane || e.Cooldown > 0 {
 			continue
 		}
@@ -277,7 +269,7 @@ func (g *Game) updateEnemies(eff float64) {
 		if leaderIdx >= 0 {
 			leadSpeed = g.enemies[leaderIdx].OwnSpeed
 		} else if leaderIsPlayer {
-			leadSpeed = eff // скорость игрока
+			leadSpeed = eff
 		}
 
 		closeCall := (leaderIdx >= 0 || leaderIsPlayer) &&
@@ -285,11 +277,9 @@ func (g *Game) updateEnemies(eff float64) {
 			gap < safeGap
 
 		if closeCall {
-			// догоняем более медленного лидера: пробуем перестроиться
 			if !g.tryLaneChange(e, i) {
-				// обе полосы заняты — тормозим за лидером, стопы горят
 				e.Braking = true
-				e.OwnSpeed -= 0.05
+				e.OwnSpeed -= 0.05 * dt
 				if e.OwnSpeed < leadSpeed {
 					e.OwnSpeed = leadSpeed
 				}
@@ -302,30 +292,28 @@ func (g *Game) updateEnemies(eff float64) {
 		} else {
 			e.Braking = false
 			if e.OwnSpeed < e.BaseOwn {
-				// дорога свободна — возвращаемся к крейсерской скорости
-				e.OwnSpeed += 0.02
+				e.OwnSpeed += 0.02 * dt
 				if e.OwnSpeed > e.BaseOwn {
 					e.OwnSpeed = e.BaseOwn
 				}
 			}
-			// спонтанное перестроение: редко, просто «оживить» поток
-			if rand.Float64() < randomLaneChance {
+			if rand.Float64() < randomLaneChance*dt {
 				g.tryLaneChange(e, i)
 			}
 		}
 	}
 
-	// перемещение вниз: наша скорость минус их собственная
+	// перемещение вниз
 	for i := range g.enemies {
 		e := &g.enemies[i]
 		rel := eff - e.OwnSpeed
 		if rel < 0.4 {
 			rel = 0.4
 		}
-		e.Y += rel
+		e.Y += rel * dt
 	}
 
-	// страховка: задний не может заехать на переднего
+	// страховка от наездов
 	for i := range g.enemies {
 		for j := range g.enemies {
 			if i == j {
