@@ -1,0 +1,17 @@
+.vscode/
+*.exe
+*.dll
+*.so
+build/
+dist/
+coverage.out
+instruction.txt
+*.png
+.env
+/dist/
+*.exe~
+.idea/
+*.swp
+*.log
+Thumbs.db
+.DS_Store
