@@ -237,8 +237,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	for _, e := range g.enemies {
 		drawCar(screen, e, g.sprites[e.Kind])
 		drawBlinker(screen, e, e.Blink, g.frame)
+		drawBrakeLights(screen, e, e.Braking)
 	}
 	drawCar(screen, g.player, g.sprites[KindPlayer])
+	// стопы игрока — при торможении стрелками
+	drawBrakeLights(screen, g.player, g.boost < -0.01)
 
 	g.drawParticles(screen)
 

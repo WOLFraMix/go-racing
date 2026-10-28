@@ -48,17 +48,52 @@ func drawCar(dst *ebiten.Image, c Car, s *Sprite) {
 	vector.FillRect(dst, float32(c.X), float32(c.Y), float32(c.W), float32(c.H), s.Fill, false)
 }
 
-// drawBlinker — мигающий оранжевый указатель на боку машины.
+// drawBlinker — мигающие оранжевые указатели на боку машины:
+// пара ламп спереди и сзади, вспышки с периодом 10 кадров.
 func drawBlinker(dst *ebiten.Image, c Car, blink, frame int) {
-	if blink == 0 || (frame/12)%2 != 0 {
+	if blink == 0 || (frame/10)%2 != 0 {
 		return // нет поворотника или фаза «выключено»
 	}
 	blinkCol := color.RGBA{R: 255, G: 150, B: 30, A: 255}
-	midY := float32(c.Y + c.H/2)
+
+	// координата X лампы: чуть выступает за борт машины
+	lampW := float32(7)
+	lampH := float32(10)
+	var lampX float32
 	if blink < 0 {
-		vector.FillRect(dst, float32(c.X-9), midY-6, 7, 12, blinkCol, false)
+		lampX = float32(c.X) - lampW - 1
 	} else {
-		vector.FillRect(dst, float32(c.X+c.W+2), midY-6, 7, 12, blinkCol, false)
+		lampX = float32(c.X + c.W + 1)
+	}
+
+	// передняя и задняя лампы
+	frontY := float32(c.Y + c.H*0.12) // у переднего бампера
+	rearY := float32(c.Y + c.H*0.82)  // у заднего бампера
+
+	vector.FillRect(dst, lampX, frontY, lampW, lampH, blinkCol, false)
+	vector.FillRect(dst, lampX, rearY, lampW, lampH, blinkCol, false)
+}
+
+// drawBrakeLights — красные стоп-сигналы у заднего бампера.
+// Тусклые габариты горят всегда, яркие стопы — при торможении.
+func drawBrakeLights(dst *ebiten.Image, c Car, braking bool) {
+	dim := color.RGBA{R: 120, G: 20, B: 20, A: 255}
+	hot := color.RGBA{R: 255, G: 40, B: 40, A: 255}
+
+	// размеры и координаты считаем в float64, конвертируем в конце
+	w, h := 8.0, 6.0
+	y := c.Y + c.H - h - 2 // у заднего бампера
+	lx := c.X + 3
+	rx := c.X + c.W - w - 3
+
+	lf, rf := float32(lx), float32(rx)
+	yy, ww, hh := float32(y), float32(w), float32(h)
+
+	vector.FillRect(dst, lf, yy, ww, hh, dim, false)
+	vector.FillRect(dst, rf, yy, ww, hh, dim, false)
+	if braking {
+		vector.FillRect(dst, lf, yy, ww, hh, hot, false)
+		vector.FillRect(dst, rf, yy, ww, hh, hot, false)
 	}
 }
 
