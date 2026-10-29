@@ -7,6 +7,7 @@ import (
 	"image/color"
 	_ "image/png"
 	"math"
+	"math/bits"
 	"math/rand"
 	"os"
 
@@ -34,6 +35,11 @@ const (
 	passBand    = 40.0   // высота клетки сетки проезда
 	passTop     = -420.0 // верх проверки: выше экрана, с запасом на stagger
 	comfortZone = 160.0  // зона комфорта вокруг игрока
+
+	passLanesMin = 2 // в каждой строке дороги свободны минимум две полосы
+
+	// сколько машин максимум вскрывается за один кадр страховки
+	repairSteps = 8
 
 	// зазор между верхом новой машины и верхней машиной полосы
 	spawnPlatoonGap = 220.0
@@ -80,6 +86,7 @@ type Game struct {
 	scrollSpeed float64
 	spawnTimer  float64
 	markOffset  float64
+	changePause float64 // глобальный кулдаун перестроений, в кадрах
 
 	stageIdx  int
 	stageTime float64
@@ -264,17 +271,20 @@ func (g *Game) collectBlockers() []blocker {
 	return bs
 }
 
-// passPath — есть ли маршрут от машины игрока до верха дороги по
-// свободным клеткам сетки (полоса × полоса Y). Ход: на клетку выше в
-// той же полосе или на соседней. Медленный тормозящий манёвр игрока
-// делает такой шаг всегда реальным, так что связность клеток — честная
-// модель проезжаемости. При провале запоминает фронт затора для ремонта.
+// passPath — гарантия проезда на ДВУХ полосах. Сетка: полоса × строка
+// высотой passBand. Правила:
+//  1. в каждой строке свободны минимум passLanesMin полос;
+//  2. свободные полосы соседних строк связаны: из занятой игроком
+//     области до верха дороги существует непрерывный маршрут по
+//     свободным клеткам (вперёд или по диагонали — манёвр).
+//
+// При провале запоминает фронт затора для ремонта.
 func (g *Game) passPath(extra ...blocker) bool {
 	bs := g.collectBlockers()
 	bs = append(bs, extra...)
 
 	nB := int((g.player.Y+g.player.H+40.0-passTop)/passBand) + 1
-	occ := make([]uint8, nB) // бит l — полоса l занята в полосе-строке i
+	occ := make([]uint8, nB) // бит l — полоса l занята в строке i
 	for _, b := range bs {
 		i0 := int((b.y0 - passTop) / passBand)
 		i1 := int((b.y1 - passTop) / passBand)
@@ -289,59 +299,43 @@ func (g *Game) passPath(extra ...blocker) bool {
 		}
 	}
 
+	// правило 1: в каждой строке минимум две свободные полосы
+	free := make([]uint8, nB)
+	for i := 0; i < nB; i++ {
+		free[i] = ^occ[i] & 0x3F
+		if bits.OnesCount8(free[i]) < passLanesMin {
+			g.wallBand = i
+			g.wallLanes = occ[i]
+			return false
+		}
+	}
+
+	// правило 2: связность свободных полос от строки игрока до верха.
+	// mask — полосы, достижимые из текущего положения игрока.
 	pl := laneOfX(g.player.X + g.player.W/2)
 	pi := int((g.player.Y + g.player.H/2 - passTop) / passBand)
 	if pi > nB-1 {
 		pi = nB - 1
 	}
-
-	reached := make([]bool, nB*laneCount)
-	bandMask := make([]uint8, nB)
-	start := pi*laneCount + pl
-	reached[start] = true
-	bandMask[pi] |= 1 << uint(pl)
-	frontier := []int{start}
-	minI := pi
-
-	for len(frontier) > 0 {
-		var next []int
-		for _, c := range frontier {
-			i, l := c/laneCount, c%laneCount
-			ni := i - 1
-			if ni < 0 {
-				return true // дошли выше экрана — маршрут есть
-			}
-			for nl := l - 1; nl <= l+1; nl++ {
-				if nl < 0 || nl >= laneCount {
-					continue
-				}
-				if occ[ni]&(1<<uint(nl)) != 0 {
-					continue
-				}
-				nc := ni*laneCount + nl
-				if !reached[nc] {
-					reached[nc] = true
-					bandMask[ni] |= 1 << uint(nl)
-					next = append(next, nc)
-					if ni < minI {
-						minI = ni
-					}
-				}
-			}
+	mask := uint8(1 << uint(pl))
+	for i := pi - 1; i >= 0; i-- {
+		// из полосы l можно уйти в l-1, l, l+1 — манёвр
+		mask |= mask<<1 | mask>>1
+		mask &= free[i] & 0x3F
+		if mask == 0 {
+			g.wallBand = i
+			g.wallLanes = occ[i]
+			return false
 		}
-		frontier = next
 	}
-
-	g.wallBand = minI
-	g.wallLanes = bandMask[minI]
-	return false
+	return true
 }
 
-// ensurePassable — ежекадровая страховка: если маршрут от игрока до
-// верха пропал (плетни сползли друг в друга), вскрываем затор, не
-// дожидаясь, пока он доедет до игрока.
+// ensurePassable — ежекадровая страховка: если гарантия «две свободные
+// полосы + связность» нарушена (плетни сползлись), вскрываем затор
+// сразу, за один кадр — до того, как он доедет до игрока.
 func (g *Game) ensurePassable() {
-	for i := 0; i < 3; i++ {
+	for i := 0; i < repairSteps; i++ {
 		if g.passPath() {
 			return
 		}
@@ -510,6 +504,11 @@ func (g *Game) updatePlaying() {
 
 	// звук мотора
 	g.audio.UpdateEngine(eff/100, g.boost, dt, g.playerBraking, g.muted)
+
+	// глобальный кулдаун перестроений: не чаще одного манёвра на дорогу
+	if g.changePause > 0 {
+		g.changePause -= 60 * dt
+	}
 
 	// спавн врагов
 	g.spawnTimer -= dt

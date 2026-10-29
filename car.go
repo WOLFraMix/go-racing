@@ -17,7 +17,7 @@ const (
 	safeGap         = 70
 	changeCooldown  = 150
 
-	randomLaneChance = 0.001
+	randomLaneChance = 0.0001
 )
 
 const (
@@ -74,6 +74,11 @@ func (g *Game) canChangeInto(e Car, target int) bool {
 }
 
 func (g *Game) tryLaneChange(e *Car, selfIdx int) bool {
+	// глобальный лимит: одновременно по всей дороге максимум один
+	// манёвр — иначе трафик превращается в хаос
+	if g.changePause > 0 {
+		return false
+	}
 	dir := 0
 	if rand.Intn(2) == 0 {
 		if g.laneFreeFor(*e, selfIdx, e.Lane-1) && g.canChangeInto(*e, e.Lane-1) {
@@ -94,6 +99,7 @@ func (g *Game) tryLaneChange(e *Car, selfIdx int) bool {
 	e.TargetLane = e.Lane + dir
 	e.Blink = dir
 	e.Cooldown = changeCooldown
+	g.changePause = 90 // пауза ~1.5 с до следующего манёвра в игре
 	return true
 }
 
@@ -294,8 +300,9 @@ func (g *Game) updateEnemies(eff, dt float64) {
 			}
 
 			if gap < desired {
-				// манёвр возможен только вне кулдауна; иначе — тормозим
-				if e.Cooldown > 0 || !g.tryLaneChange(e, i) {
+				// манёвр — только при реальном сближении с лидером,
+				// а не при любом подходе к желаемой дистанции
+				if e.Cooldown > 0 || dc <= 0.05 || !g.tryLaneChange(e, i) {
 					e.Braking = true
 					// не быстрее лидера, пока дистанция меньше желаемой
 					if e.OwnSpeed > leadSpeed {
