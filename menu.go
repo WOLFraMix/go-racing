@@ -113,7 +113,8 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	drawText(screen, "▶", screenWidth-78, nameY, 20, white)
 
 	// ---------- выбор стартовой локации ----------
-	const cardW, cardH, gap = 78, 66, 8
+	const cardW, cardH, gap = 72, 66, 7
+
 	totalW := len(stageDefs)*cardW + (len(stageDefs)-1)*gap
 	startX := (screenWidth - totalW) / 2
 	cardsY := nameY + 40
@@ -137,6 +138,15 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 		} else if def.Name == "HIGHWAY" {
 			vector.FillRect(screen, float32(x+12), float32(cardsY+3), 4, cardH-6,
 				color.RGBA{R: 165, G: 168, B: 175, A: 255}, false)
+		} else if def.Name == "DESERT" {
+			// кактус на карточке пустыни
+			cact := color.RGBA{R: 58, G: 104, B: 54, A: 255}
+			cx := float32(x + cardW/2)
+			vector.FillRect(screen, cx-2, float32(cardsY+cardH-22), 4, 14, cact, false)
+			vector.FillRect(screen, cx-8, float32(cardsY+cardH-18), 4, 7, cact, false)
+			vector.FillRect(screen, cx-8, float32(cardsY+cardH-13), 7, 3, cact, false)
+			vector.FillRect(screen, cx+4, float32(cardsY+cardH-20), 4, 7, cact, false)
+			vector.FillRect(screen, cx+2, float32(cardsY+cardH-15), 6, 3, cact, false)
 		}
 		clr := color.RGBA{R: 200, G: 200, B: 210, A: 255}
 		if sel {

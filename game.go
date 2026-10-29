@@ -114,6 +114,8 @@ type Game struct {
 	playerSkins []Sprite
 	skinNames   []string
 
+	scratch *ebiten.Image // временный холст для кроссфейда декораций
+
 	// сгенерированные варианты скинов врагов: перекраска + детали
 	enemyVariants map[CarKind][]Sprite
 

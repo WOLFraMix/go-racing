@@ -24,9 +24,52 @@ func hashIdx(idx int) int {
 }
 
 func (g *Game) drawScenery(screen *ebiten.Image, def StageDef) {
-	// frac растёт с пройденной дистанцией → все ряды уезжают вниз,
-	// как дорожная разметка. base смещает хеш рядов, чтобы сверху
-	// появлялись новые декорации, а не зацикленный узор.
+	// фаза кроссфейда: те же 0..1, что и у цветов в currentDef
+	cur := g.stageIdx
+	next := (cur + 1) % len(stageDefs)
+	t := 0.0
+	remain := stageDefs[cur].Duration - g.stageTime
+	if remain < stageTransition {
+		t = 1 - remain/stageTransition
+		if t < 0 {
+			t = 0
+		}
+		if t > 1 {
+			t = 1
+		}
+	}
+
+	if t <= 0.001 {
+		g.drawDecorAlpha(screen, stageDefs[cur].Name, 1)
+	} else if t >= 0.999 {
+		g.drawDecorAlpha(screen, stageDefs[next].Name, 1)
+	} else {
+		// старые декорации тают, новые проявляются — одновременно
+		g.drawDecorAlpha(screen, stageDefs[cur].Name, 1-t)
+		g.drawDecorAlpha(screen, stageDefs[next].Name, t)
+	}
+}
+
+// drawDecorAlpha — рисует декорации этапа name с прозрачностью alpha:
+// сперва на временный холст, затем на экран с масштабом альфы.
+func (g *Game) drawDecorAlpha(screen *ebiten.Image, name string, alpha float64) {
+	if alpha <= 0.01 {
+		return
+	}
+	if g.scratch == nil {
+		g.scratch = ebiten.NewImage(screenWidth, screenHeight)
+	}
+	g.scratch.Clear()
+	g.drawDecorFor(g.scratch, name)
+
+	a := uint8(clamp(alpha*255, 0, 255))
+	op := &ebiten.DrawImageOptions{}
+	op.ColorScale.ScaleWithColor(color.RGBA{R: a, G: a, B: a, A: a})
+	screen.DrawImage(g.scratch, op)
+}
+
+// drawDecorFor — декорации конкретного этапа, включая его отбойники.
+func (g *Game) drawDecorFor(screen *ebiten.Image, name string) {
 	frac := math.Mod(g.markOffset, scenerySpacing)
 	base := int(g.markOffset / scenerySpacing)
 	rows := screenHeight/int(scenerySpacing) + 2
@@ -36,14 +79,13 @@ func (g *Game) drawScenery(screen *ebiten.Image, def StageDef) {
 		if y < -scenerySpacing || y > screenHeight+scenerySpacing {
 			continue
 		}
-		idx := base - j
-		h := hashIdx(idx)
+		h := hashIdx(base - j)
 
-		switch def.Name {
-		case "CITY", "DAWN":
+		switch name {
+		case "CITY", "DAWN", "DUSK":
 			g.drawCityRow(screen, y, h)
-		case "DUSK":
-			g.drawCityRow(screen, y, h)
+		case "DESERT":
+			g.drawDesertRow(screen, y, h)
 		case "HIGHWAY":
 			g.drawHighwayRow(screen, y, h)
 		case "NIGHT":
@@ -51,15 +93,20 @@ func (g *Game) drawScenery(screen *ebiten.Image, def StageDef) {
 		}
 	}
 
-	// отбойники на трассе — сплошные полосы вдоль всей дороги
-	if def.Name == "HIGHWAY" {
-		rail := color.RGBA{R: 165, G: 168, B: 175, A: 255}
-		railDark := color.RGBA{R: 110, G: 112, B: 118, A: 255}
-		vector.FillRect(screen, float32(roadX0-7), 0, 5, screenHeight, railDark, false)
-		vector.FillRect(screen, float32(roadX0-6), 0, 3, screenHeight, rail, false)
-		vector.FillRect(screen, float32(roadX1+2), 0, 5, screenHeight, railDark, false)
-		vector.FillRect(screen, float32(roadX1+3), 0, 3, screenHeight, rail, false)
+	if name == "HIGHWAY" {
+		g.drawRails(screen)
 	}
+}
+
+// drawRails — отбойники шоссе. Теперь часть декораций этапа,
+// тают и проявляются вместе со всем остальным.
+func (g *Game) drawRails(screen *ebiten.Image) {
+	rail := color.RGBA{R: 165, G: 168, B: 175, A: 255}
+	railDark := color.RGBA{R: 110, G: 112, B: 118, A: 255}
+	vector.FillRect(screen, float32(roadX0-7), 0, 5, screenHeight, railDark, false)
+	vector.FillRect(screen, float32(roadX0-6), 0, 3, screenHeight, rail, false)
+	vector.FillRect(screen, float32(roadX1+2), 0, 5, screenHeight, railDark, false)
+	vector.FillRect(screen, float32(roadX1+3), 0, 3, screenHeight, rail, false)
 }
 
 // drawCityRow — деревья и кусты вдоль дороги.
@@ -89,19 +136,119 @@ func (g *Game) drawCityRow(screen *ebiten.Image, y float64, h int) {
 	}
 }
 
-// drawHighwayRow — редкие дорожные знаки на серых полях.
+// drawDesertRow — пятна дюн, сагуаро, камни, сухие кусты. Изредка —
+// череп у обочины, куда без него в пустыне.
+func (g *Game) drawDesertRow(screen *ebiten.Image, y float64, h int) {
+	side := h % 2
+	ox := float64(h%9) - 4
+
+	// редкое тёмное пятно «дюны» на обочине — оживляет ровный песок
+	if r := h % 6; r == 1 || r == 4 {
+		sand := color.RGBA{R: 196, G: 170, B: 118, A: 90}
+		cx := float32(14 + ox)
+		if side == 1 {
+			cx = float32(screenWidth - 14 - ox)
+		}
+		vector.FillCircle(screen, cx, float32(y+16), 22, sand, false)
+		vector.FillCircle(screen, cx+26, float32(y+26), 14, sand, false)
+	}
+
+	green := color.RGBA{R: 58, G: 104, B: 54, A: 255}
+	dark := color.RGBA{R: 44, G: 84, B: 42, A: 255}
+
+	switch r := h % 20; {
+	case r == 0 || r == 10:
+		// сагуаро: ствол, макушка и одна рука
+		x := float32(10 + ox*0.5)
+		if side == 1 {
+			x = float32(screenWidth - 16 - ox*0.5)
+		}
+		vector.FillRect(screen, x, float32(y-8), 6, 30, green, false)
+		vector.FillCircle(screen, x+3, float32(y-9), 3, green, false)
+		if h%2 == 0 {
+			vector.FillRect(screen, x-7, float32(y+2), 5, 10, green, false)
+			vector.FillRect(screen, x-7, float32(y+9), 9, 4, green, false)
+		} else {
+			vector.FillRect(screen, x+8, float32(y+4), 5, 10, green, false)
+			vector.FillRect(screen, x+5, float32(y+11), 8, 4, green, false)
+		}
+		vector.FillRect(screen, x+1, float32(y-8), 1, 30, dark, false) // тень на стволе
+	case r == 2 || r == 12:
+		// камни
+		rock := color.RGBA{R: 150, G: 132, B: 108, A: 255}
+		rockHi := color.RGBA{R: 176, G: 158, B: 132, A: 255}
+		x := float32(6 + ox*0.5)
+		if side == 1 {
+			x = float32(screenWidth - 12 - ox*0.5)
+		}
+		vector.FillCircle(screen, x, float32(y+10), 8, rock, false)
+		vector.FillCircle(screen, x+9, float32(y+13), 5, rock, false)
+		vector.FillCircle(screen, x-2, float32(y+7), 4, rockHi, false)
+	case r == 4 || r == 15:
+		// сухой кустик
+		dry := color.RGBA{R: 168, G: 140, B: 84, A: 255}
+		x := float32(screenWidth - 10 - ox*0.5)
+		if side == 1 {
+			x = float32(8 + ox*0.5)
+		}
+		vector.FillCircle(screen, x, float32(y+12), 6, dry, false)
+		vector.FillCircle(screen, x+6, float32(y+8), 4, dry, false)
+	case r == 7:
+		// череп у обочины — пустыня обязана
+		bone := color.RGBA{R: 236, G: 228, B: 208, A: 255}
+		x := float32(roadX0 - 12)
+		vector.FillCircle(screen, x, float32(y+14), 5, bone, false)
+		vector.FillRect(screen, x-6, float32(y+9), 5, 3, bone, false)
+		vector.FillRect(screen, x-6, float32(y+15), 5, 3, bone, false)
+	}
+}
+
+// drawHighwayRow — облик шоссе: фонари-стойки с тёплым светом через
+// ряд, километровые столбики, изредка билборд.
 func (g *Game) drawHighwayRow(screen *ebiten.Image, y float64, h int) {
-	if h%4 != 0 {
-		return
+	pole := color.RGBA{R: 108, G: 110, B: 118, A: 255}
+	glowOut := color.RGBA{R: 255, G: 222, B: 160, A: 22}
+	glowIn := color.RGBA{R: 255, G: 230, B: 175, A: 44}
+
+	// фонарь через ряд, стороны чередуются
+	if h%2 == 0 {
+		vector.FillRect(screen, float32(roadX0-9), float32(y+6), 3, 22, pole, false)
+		vector.FillRect(screen, float32(roadX0-9), float32(y+4), 9, 3, pole, false)
+		vector.FillCircle(screen, float32(roadX0-4), float32(y+7), 16, glowOut, false)
+		vector.FillCircle(screen, float32(roadX0-4), float32(y+7), 8, glowIn, false)
+	} else {
+		vector.FillRect(screen, float32(roadX1+6), float32(y+6), 3, 22, pole, false)
+		vector.FillRect(screen, float32(roadX1+0), float32(y+4), 9, 3, pole, false)
+		vector.FillCircle(screen, float32(roadX1+4), float32(y+7), 16, glowOut, false)
+		vector.FillCircle(screen, float32(roadX1+4), float32(y+7), 8, glowIn, false)
 	}
-	pole := color.RGBA{R: 120, G: 122, B: 126, A: 255}
-	sign := color.RGBA{R: 40, G: 90, B: 200, A: 255}
-	x := float32(roadX0 - 8)
-	if h%8 == 0 {
-		x = float32(roadX1 + 2)
+
+	// километровый столбик — маленькая белая тумба с серой шляпкой
+	if h%5 == 0 {
+		x := float32(roadX0 - 14)
+		if h%10 == 5 {
+			x = float32(roadX1 + 8)
+		}
+		vector.FillRect(screen, x, float32(y+12), 6, 10, color.RGBA{R: 228, G: 228, B: 232, A: 255}, false)
+		vector.FillRect(screen, x, float32(y+10), 6, 4, color.RGBA{R: 60, G: 60, B: 66, A: 255}, false)
 	}
-	vector.FillRect(screen, x+2, float32(y-10), 2, 14, pole, false)
-	vector.FillRect(screen, x, float32(y-18), 6, 9, sign, false)
+
+	// билборд — редко, стоит на высоких ногах
+	if h%11 == 3 {
+		x := float32(screenWidth - 58)
+		if h%22 == 3 {
+			x = float32(4)
+		}
+		legs := color.RGBA{R: 96, G: 98, B: 104, A: 255}
+		panel := color.RGBA{R: 30, G: 90, B: 170, A: 255}
+		panelEdge := color.RGBA{R: 210, G: 214, B: 222, A: 255}
+		vector.FillRect(screen, x+6, float32(y-16), 3, 18, legs, false)
+		vector.FillRect(screen, x+38, float32(y-16), 3, 18, legs, false)
+		vector.FillRect(screen, x, float32(y-44), 48, 30, panelEdge, false)
+		vector.FillRect(screen, x+2, float32(y-42), 44, 26, panel, false)
+		// «дорога» на щите — белая стрелка в перспективе
+		vector.FillRect(screen, x+21, float32(y-38), 5, 16, color.RGBA{R: 235, G: 235, B: 240, A: 255}, false)
+	}
 }
 
 // drawNightRow — фонари: столбик на обочине и тёплое пятно света на асфальте.
