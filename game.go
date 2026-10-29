@@ -426,7 +426,7 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 
 	g.drawScenery(screen, def)
 
-	// ночь: затемнение и лучи фар — до машин
+	// ночь: затемнение и лучи фар — до машин, чтобы лучи лежали под корпусом
 	dark := def.Night
 	if dark > 0.02 {
 		vector.FillRect(screen, 0, 0, screenWidth, screenHeight,
@@ -437,7 +437,7 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 		for _, e := range g.enemies {
 			drawHeadlights(screen, e, float32(k))
 		}
-		drawHeadlights(screen, playerDraw, float32(k)) // ← сдвинутая копия, не g.player
+		drawHeadlights(screen, playerDraw, float32(k))
 	}
 
 	for _, e := range g.enemies {
@@ -450,11 +450,12 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	drawCar(screen, playerDraw, &ps)
 	drawBrakeLights(screen, playerDraw, g.playerBraking)
 
+	// ночь: габариты и стоп-сигналы — после машин, поверх корпуса
 	if dark > 0.2 {
 		for _, e := range g.enemies {
-			drawTailLights(screen, e)
+			drawTailLights(screen, e, e.Braking)
 		}
-		drawTailLights(screen, playerDraw)
+		drawTailLights(screen, playerDraw, g.playerBraking)
 	}
 
 	for _, p := range g.sparks {

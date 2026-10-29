@@ -161,26 +161,22 @@ func drawHeadlights(dst *ebiten.Image, c Car, k float32) {
 	}
 }
 
-// drawTailLights — два задних фонаря со свечением. Ночью горят всегда;
-// при торможении поверх дорисовываются яркие стопы drawBrakeLights.
-func drawTailLights(dst *ebiten.Image, c Car) {
-	lampW, lampH := 9.0, 5.0
-	y := c.Y + c.H - lampH - 2
-	lamps := []float64{c.X + 3, c.X + c.W - lampW - 3}
+// drawTailLights — ночные габариты. Без торможения — тусклый огонь,
+// при торможении — яркие стоп-сигналы.
+func drawTailLights(dst *ebiten.Image, c Car, braking bool) {
+	base := color.RGBA{R: 200, G: 40, B: 30, A: 110} // тусклый габарит
+	stop := color.RGBA{R: 255, G: 60, B: 40, A: 235} // стоп-сигнал
+	halo := color.RGBA{R: 255, G: 50, B: 40, A: 70}  // свечение вокруг
 
-	// очень сдержанное свечение позади каждого фонаря
-	for _, lx := range lamps {
-		cxp := lx + lampW/2
-		vector.FillCircle(dst, float32(cxp), float32(y+lampH+1), 9,
-			color.RGBA{R: 200, G: 40, B: 30, A: 10}, false)
-		vector.FillCircle(dst, float32(cxp), float32(y+lampH+1), 4,
-			color.RGBA{R: 220, G: 50, B: 35, A: 18}, false)
-	}
-
-	// сами фонари — насыщенные тёмно-красные плашки
-	lamp := color.RGBA{R: 150, G: 26, B: 26, A: 210}
-	for _, lx := range lamps {
-		vector.FillRect(dst, float32(lx), float32(y), float32(lampW), float32(lampH), lamp, false)
+	for _, lx := range []float64{c.X + c.W*0.16, c.X + c.W*0.84} {
+		cy := c.Y + c.H - 6
+		if braking {
+			// ореол свечения при торможении
+			vector.FillCircle(dst, float32(lx), float32(cy), 9, halo, false)
+			vector.FillCircle(dst, float32(lx), float32(cy), 5, stop, false)
+		} else {
+			vector.FillCircle(dst, float32(lx), float32(cy), 4, base, false)
+		}
 	}
 }
 
