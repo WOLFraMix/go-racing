@@ -6,7 +6,6 @@ build/
 dist/
 coverage.out
 instruction.txt
-*.png
 .env
 /dist/
 *.exe~

@@ -425,9 +425,11 @@ func (g *Game) spawnEnemy() {
 func (g *Game) drawWorld(screen *ebiten.Image) {
 	def := g.currentDef()
 
-	// визуальная позиция игрока с учётом «клевка» — нужна и фарам, и корпусу
+	// ВАЖНО: игрок рисуется строго по логической позиции (g.player.Y),
+	// без всяких визуальных сдвигов вроде g.yOff. Хитбокс считается по
+	// g.player — если спрайт рисовать со сдвигом, картинка и коллизии
+	// расходятся, и при торможении краш «появляется из ниоткуда».
 	playerDraw := g.player
-	playerDraw.Y += g.yOff
 
 	vector.FillRect(screen, 0, 0, screenWidth, screenHeight, def.Grass, false)
 	vector.FillRect(screen, roadX0, 0, roadX1-roadX0, screenHeight, def.Asphalt, false)

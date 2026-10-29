@@ -13,13 +13,6 @@ const (
 	truckW = laneWidth - 16
 	truckH = 130
 
-	playerSpeed = 6.0
-
-	boostMax  = 2.2
-	brakeMax  = 1.6
-	boostGain = 0.05
-	brakeGain = 0.07
-
 	laneChangeSpeed = 1.3 // плавное перестроение
 	safeGap         = 70
 	changeCooldown  = 150
@@ -94,30 +87,30 @@ func RandomEnemy(lane int) Car {
 	base := 1.0 + rand.Float64()*0.7
 
 	switch r := rand.Float64(); {
-	case r < 0.12:
+	case r < 0.02:
+		kind = KindAmbulance // редкая гостья — 2%
+		points = 4
+		base = 1.9 + rand.Float64()*0.5
+	case r < 0.14:
 		kind = KindSport
 		points = 2
 		base = 2.1 + rand.Float64()*0.6
-	case r < 0.26:
+	case r < 0.27:
 		kind = KindTruck
 		w = float64(truckW)
 		h = float64(truckH)
 		points = 3
 		base = 0.4 + rand.Float64()*0.4
-	case r < 0.38:
+	case r < 0.39:
 		kind = KindMinibus
 		points = 2
 		base = 0.7 + rand.Float64()*0.3
-	case r < 0.48:
+	case r < 0.49:
 		kind = KindBus
 		h = float64(busH)
 		points = 3
 		base = 0.5 + rand.Float64()*0.3
-	case r < 0.55:
-		kind = KindAmbulance
-		points = 4
-		base = 1.9 + rand.Float64()*0.5
-	case r < 0.67:
+	case r < 0.62:
 		kind = KindSUV
 	}
 
@@ -314,21 +307,34 @@ func (g *Game) updateEnemies(eff, dt float64) {
 		e.Y += rel * dt
 	}
 
-	// страховка от наездов
+	// страховка от наездов:
+	// a — та, что позади (Y меньше, выше на экране), b — впереди.
+	// Нос a (a.Y + a.H) не должен заходить за хвост b (b.Y):
+	// при пересечении a останавливается СЗАДИ, прижав нос к хвосту b.
 	for i := range g.enemies {
+		a := &g.enemies[i]
 		for j := range g.enemies {
 			if i == j {
 				continue
 			}
-			a, b := g.enemies[i], g.enemies[j]
-			if a.Y <= b.Y || !xOverlap(a, b) {
+			b := &g.enemies[j]
+			if a.Y > b.Y || !xOverlap(*a, *b) {
 				continue
 			}
-			if a.Y < b.Y+b.H {
-				g.enemies[i].Y = b.Y + b.H
-				g.enemies[i].OwnSpeed = math.Min(g.enemies[i].OwnSpeed, b.OwnSpeed)
-				g.enemies[i].Braking = true
+			// реальное пересечение по вертикали: нос a зашёл за хвост b
+			if a.Y+a.H > b.Y {
+				a.Y = b.Y - a.H
+				if a.OwnSpeed > b.OwnSpeed {
+					a.OwnSpeed = b.OwnSpeed
+				}
+				a.Braking = true
 			}
 		}
 	}
+}
+
+// HitRect — единственный источник правды о прямоугольнике машины.
+// X, Y — левый верхний угол (как их использует drawCar).
+func (c Car) HitRect() (x, y, w, h float64) {
+	return c.X, c.Y, c.W, c.H
 }

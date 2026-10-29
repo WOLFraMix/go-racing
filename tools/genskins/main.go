@@ -23,12 +23,13 @@ type kindDef struct {
 	dir          string
 	base         string
 	repaintLight bool
+	fixBumpers   bool // седан: всё тёмно-красное красим, огни сохраняем
 	skins        []skinDef
 }
 
 var kinds = []kindDef{
 	{
-		dir: "sedan", base: "assets/car_sedan.png",
+		dir: "sedan", base: "assets/car_sedan.png", fixBumpers: true,
 		skins: []skinDef{
 			{name: "red", hex: "C42B2B"},
 			{name: "white", hex: "E8E9EB"},
@@ -89,7 +90,6 @@ var kinds = []kindDef{
 	{
 		dir: "truck", base: "assets/truck.png", repaintLight: true,
 		skins: []skinDef{
-			{name: "white", hex: "EFEFF1"},
 			{name: "blue", hex: "37527A"},
 			{name: "red", hex: "8C2B2B"},
 			{name: "green", hex: "40603F"},
@@ -133,7 +133,7 @@ func main() {
 		}
 
 		for _, sk := range kd.skins {
-			img := repaint(src, hexColor(sk.hex), kd.repaintLight)
+			img := repaint(src, hexColor(sk.hex), kd.repaintLight, kd.fixBumpers)
 			if sk.stripe != "" {
 				addStripe(img, hexColor(sk.stripe))
 			}
@@ -161,7 +161,7 @@ func main() {
 	fmt.Println("OK assets/skins/ambulance/ambulance.png")
 }
 
-func repaint(src image.Image, target color.RGBA, repaintLight bool) *image.RGBA {
+func repaint(src image.Image, target color.RGBA, repaintLight, fixBumpers bool) *image.RGBA {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -181,7 +181,6 @@ func repaint(src image.Image, target color.RGBA, repaintLight bool) *image.RGBA 
 				continue
 			}
 			hh, s, v := rgbToHSV(float64(c.R)/255, float64(c.G)/255, float64(c.B)/255)
-			_ = v
 			if s > 0.15 && v > 0.15 && v < 0.92 {
 				bins[int(math.Mod(hh+10, 360)/20)]++
 			}
@@ -215,7 +214,7 @@ func repaint(src image.Image, target color.RGBA, repaintLight bool) *image.RGBA 
 	bodyLum := 0.3
 	bodyHue := center
 	if n > 0 {
-		bodyHue, _, _ = rgbToHSV(rs/n, gs/n, bs/n) // ИСПРАВЛЕНО: тон, а не насыщенность
+		bodyHue, _, _ = rgbToHSV(rs/n, gs/n, bs/n)
 		bodyLum = lum(rs/n, gs/n, bs/n)
 	}
 
@@ -229,21 +228,32 @@ func repaint(src image.Image, target color.RGBA, repaintLight bool) *image.RGBA 
 			a := c.A
 			hh, s, v := rgbToHSV(r, g, bl)
 
+			paint := false
 			protected := false
-			// фары: верхняя полоса, бледно-кремовые
-			if float64(y) < float64(h)*0.16 && hh >= 15 && hh <= 80 && s < 0.5 && v > 0.85 {
-				protected = hueDiff(hh, bodyHue) < 30
-			}
-			// стопы: нижняя полоса, яркие красные — всегда
-			if float64(y) > float64(h)*0.88 && (hh < 25 || hh > 335) && s > 0.5 && v > 0.55 {
-				protected = true
-			}
-			// красные огни вне полосы — если кузов не красный
-			if (hh < 25 || hh > 335) && s > 0.5 && v > 0.55 && hueDiff(hh, bodyHue) > 30 {
-				protected = true
+
+			if fixBumpers {
+				// фары: кремовые в верхней зоне — не красим никогда
+				if float64(y) < float64(h)*0.08 && hh >= 15 && hh <= 80 && s < 0.5 && v > 0.85 {
+					protected = true
+				}
+				// задние огни: ярко-красная полоса у нижнего края.
+				// Тёмно-красный кузов (v~0.4) красится, яркие огни (v>0.6) — нет
+				if float64(y) > float64(h)*0.89 && (hh < 25 || hh > 335) && v > 0.6 {
+					protected = true
+				}
+			} else {
+				// остальные типы: прежние правила, они работают
+				if float64(y) < float64(h)*0.16 && hh >= 15 && hh <= 80 && s < 0.5 && v > 0.85 {
+					protected = true
+				}
+				if float64(y) > float64(h)*0.88 && (hh < 25 || hh > 335) && s > 0.5 && v > 0.55 {
+					protected = true
+				}
+				if (hh < 25 || hh > 335) && s > 0.5 && v > 0.55 && hueDiff(hh, bodyHue) > 30 {
+					protected = true
+				}
 			}
 
-			paint := false
 			if !protected {
 				if hueDiff(hh, bodyHue) < 55 && s > 0.08 && v > 0.15 {
 					paint = true
@@ -256,7 +266,7 @@ func repaint(src image.Image, target color.RGBA, repaintLight bool) *image.RGBA 
 			if paint && tLum > 0.55 && v < 0.35 && s > 0.3 {
 				paint = false
 			}
-			// серая фурнитура на не-светлых кузовах не красится
+			// серая фурнитура (бампер, хром) на не-светлых кузовах не красится
 			if paint && !repaintLight && s < 0.15 && v > 0.4 {
 				paint = false
 			}
