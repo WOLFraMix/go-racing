@@ -46,6 +46,10 @@ const (
 
 	// случайный вертикальный сдвиг спавна: плетни не стартуют синхронно
 	spawnStagger = 220.0
+
+	// запрет «строк»: в соседних полосах от точки спавна не должно быть
+	// машин ближе этого расстояния по вертикали
+	rowClear = 120.0
 )
 
 // множитель плотности спавна по сложности
@@ -389,6 +393,7 @@ func (g *Game) repairWall() bool {
 	if e.OwnSpeed < e.BaseOwn {
 		e.OwnSpeed = e.BaseOwn
 	}
+	e.BoostUntil = int(g.frame) + 90
 	return true
 }
 
@@ -420,6 +425,35 @@ func (g *Game) spawnSafe(extra ...blocker) bool {
 		if free < 2 {
 			return false
 		}
+	}
+	return true
+}
+
+// antiRow — запрет «строк»: в своей и соседних полосах от точки
+// спавна не должно быть машин ближе rowClear по вертикали.
+// Ряд из машин на одной высоте не образуется даже при плотном спавне.
+func (g *Game) antiRow(e Car) bool {
+	l := laneOfX(e.X + e.W/2)
+	for i := range g.enemies {
+		o := &g.enemies[i]
+		dl := laneOfX(o.X+o.W/2) - l
+		if dl < 0 {
+			dl = -dl
+		}
+		if dl > 1 {
+			continue
+		}
+		if o.Y < e.Y+e.H+rowClear && e.Y < o.Y+o.H+rowClear {
+			return false
+		}
+	}
+	p := g.player
+	dl := laneOfX(p.X+p.W/2) - l
+	if dl < 0 {
+		dl = -dl
+	}
+	if dl <= 1 && p.Y < e.Y+e.H+rowClear && e.Y < p.Y+p.H+rowClear {
+		return false
 	}
 	return true
 }
@@ -514,9 +548,9 @@ func (g *Game) updatePlaying() {
 	g.spawnTimer -= dt
 	if g.spawnTimer <= 0 {
 		if g.spawnEnemy() {
-			g.spawnTimer = (120 + rand.Float64()*120) / (math.Max(eff, 1) * diffMult[g.difficulty])
+			g.spawnTimer = math.Max(0.25, (120+rand.Float64()*120)/(math.Max(eff, 1)*diffMult[g.difficulty]))
 		} else {
-			g.spawnTimer = 0.12 // не вышло — повторяем чуть позже, без залпов
+			g.spawnTimer = 0.12
 		}
 	}
 
@@ -638,7 +672,10 @@ func (g *Game) spawnEnemy() bool {
 
 	for _, l := range cand {
 		e := RandomEnemy(l)
-		e.Y -= rand.Float64() * spawnStagger // плетни стартуют вразнобой
+		e.Y -= rand.Float64() * spawnStagger
+		if !g.antiRow(e) {
+			continue // не сеем строки: рядом по высоте уже кто-то стоит
+		}
 		if g.spawnSafe(blocker{lane: l, y0: e.Y, y1: e.Y + e.H}) {
 			if len(g.enemyVariants[e.Kind]) > 0 {
 				e.Skin = rand.Intn(len(g.enemyVariants[e.Kind]))

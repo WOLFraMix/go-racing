@@ -53,6 +53,7 @@ type Car struct {
 	NearMiss   bool
 	Points     int
 	Skin       int // индекс варианта скина среди сгенерированных
+	BoostUntil int // кадр, до которого машина игнорирует зажим за лидером (после ремонта)
 }
 
 // randomSpeed — рандомизация скорости: 80–120% от базовой.
@@ -291,15 +292,20 @@ func (g *Game) updateEnemies(eff, dt float64) {
 				leadSpeed = eff
 			}
 
-			// желаемая дистанция: safeGap + запас на скорость сближения.
-			// dc > 0 — догоняем лидера: тормозим ЗАРАНЕЕ, а не на пороге.
 			dc := e.OwnSpeed - leadSpeed
 			desired := safeGap + dc*lookAhead
 			if desired < safeGap {
 				desired = safeGap
 			}
 
-			if gap < desired {
+			if int(g.frame) < e.BoostUntil {
+				// аварийный разгон после ремонта затора: не тормозим
+				// и не позволяем логике следования снова зажать скорость
+				e.Braking = false
+				if e.OwnSpeed < e.BaseOwn {
+					e.OwnSpeed = e.BaseOwn
+				}
+			} else if gap < desired {
 				// манёвр — только при реальном сближении с лидером,
 				// а не при любом подходе к желаемой дистанции
 				if e.Cooldown > 0 || dc <= 0.05 || !g.tryLaneChange(e, i) {
@@ -381,7 +387,7 @@ func (g *Game) updateEnemies(eff, dt float64) {
 			if a.Y > b.Y || !xOverlap(*a, *b) {
 				continue
 			}
-			if a.Y+a.H > b.Y {
+			if a.Y+a.H > b.Y && int(g.frame) >= a.BoostUntil {
 				a.Y = b.Y - a.H
 				if a.OwnSpeed > b.OwnSpeed {
 					a.OwnSpeed = b.OwnSpeed
