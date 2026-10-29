@@ -146,7 +146,7 @@ func init() {
 }
 
 // drawHeadlights — два луча от левой и правой фар; k — яркость от темноты.
-func drawHeadlights(dst *ebiten.Image, c Car, k float64) {
+func drawHeadlights(dst *ebiten.Image, c Car, k float32) {
 	if beamImg == nil {
 		return
 	}
@@ -155,8 +155,8 @@ func drawHeadlights(dst *ebiten.Image, c Car, k float64) {
 	for _, lx := range []float64{c.X + c.W*0.18, c.X + c.W*0.82} {
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Scale(w/160, length/180)
-		op.GeoM.Translate(lx-w/2, c.Y-length)
-		op.ColorScale.Scale(float32(k), float32(k), float32(k), float32(k)) // плавный набор яркости
+		op.GeoM.Translate(lx-w/2, c.Y-length+c.H*0.06) // нахлёст на крышу
+		op.ColorScale.Scale(k, k, k, k)
 		dst.DrawImage(beamImg, op)
 	}
 }

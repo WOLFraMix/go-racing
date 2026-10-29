@@ -75,6 +75,7 @@ type Game struct {
 
 	boost         float64
 	playerBraking bool
+	yOff          float64 // визуальный сдвиг машины по Y
 
 	frame float64
 
@@ -248,6 +249,15 @@ func (g *Game) updatePlaying() {
 		g.boost += (0 - g.boost) * math.Min(1, 4*dt)
 	}
 
+	// «клевок» машины: тормоз — вниз, газ — вверх
+	targetYOff := 0.0
+	if g.playerBraking {
+		targetYOff = 20.0
+	} else if g.boost > 0.5 {
+		targetYOff = -12.0
+	}
+	g.yOff += (targetYOff - g.yOff) * math.Min(1, 8*dt)
+
 	// смена этапа
 	def := stageDefs[g.stageIdx]
 	g.stageTime += dt
@@ -393,6 +403,10 @@ func (g *Game) spawnEnemy() {
 func (g *Game) drawWorld(screen *ebiten.Image) {
 	def := g.currentDef()
 
+	// визуальная позиция игрока с учётом «клевка» — нужна и фарам, и корпусу
+	playerDraw := g.player
+	playerDraw.Y += g.yOff
+
 	vector.FillRect(screen, 0, 0, screenWidth, screenHeight, def.Grass, false)
 	vector.FillRect(screen, roadX0, 0, roadX1-roadX0, screenHeight, def.Asphalt, false)
 
@@ -400,7 +414,6 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	vector.FillRect(screen, roadX0+2, 0, 3, screenHeight, edge, false)
 	vector.FillRect(screen, roadX1-5, 0, 3, screenHeight, edge, false)
 
-	// разметка полос — едет вниз вместе с миром
 	const dashLen, spacing = 42, 88
 	frac := math.Mod(g.markOffset, spacing)
 	for j := -1; j <= screenHeight/spacing+1; j++ {
@@ -422,9 +435,9 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	if dark > 0.2 {
 		k := (dark - 0.2) / 0.8
 		for _, e := range g.enemies {
-			drawHeadlights(screen, e, k)
+			drawHeadlights(screen, e, float32(k))
 		}
-		drawHeadlights(screen, g.player, k)
+		drawHeadlights(screen, playerDraw, float32(k)) // ← сдвинутая копия, не g.player
 	}
 
 	for _, e := range g.enemies {
@@ -434,18 +447,16 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 		drawBrakeLights(screen, e, e.Braking)
 	}
 	ps := g.playerSkins[g.skinIdx]
-	drawCar(screen, g.player, &ps)
-	drawBrakeLights(screen, g.player, g.playerBraking)
+	drawCar(screen, playerDraw, &ps)
+	drawBrakeLights(screen, playerDraw, g.playerBraking)
 
-	// ночь: задние габариты поверх машин
 	if dark > 0.2 {
 		for _, e := range g.enemies {
 			drawTailLights(screen, e)
 		}
-		drawTailLights(screen, g.player)
+		drawTailLights(screen, playerDraw)
 	}
 
-	// искры взрыва
 	for _, p := range g.sparks {
 		c := p.Clr
 		c.A = uint8(clamp(255*p.Life/p.Max, 0, 255))
