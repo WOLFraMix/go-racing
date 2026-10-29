@@ -24,8 +24,13 @@ var skinMeta = []skinDef{
 	{"player_orange.png", color.RGBA{R: 240, G: 120, B: 35, A: 255}, "SUNSET"},
 }
 
-// drawTextCenteredX — как drawTextCentered, но центр по координате cx.
 func drawTextCenteredX(dst *ebiten.Image, s string, cx int, y int, size float64, clr color.Color) {
+	sh := &text.DrawOptions{}
+	sh.GeoM.Translate(float64(cx+2), float64(y+2))
+	sh.ColorScale.ScaleWithColor(color.RGBA{R: 0, G: 0, B: 0, A: 180})
+	sh.PrimaryAlign = text.AlignCenter
+	text.Draw(dst, s, face(size), sh)
+
 	op := &text.DrawOptions{}
 	op.GeoM.Translate(float64(cx), float64(y))
 	op.ColorScale.ScaleWithColor(clr)

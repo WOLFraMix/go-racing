@@ -13,7 +13,7 @@ import (
 
 const (
 	screenWidth  = 430
-	screenHeight = 900
+	screenHeight = 1000
 
 	roadMargin = 12
 	roadX0     = roadMargin
@@ -23,7 +23,8 @@ const (
 	laneCount = 6
 	laneWidth = roadW / laneCount
 
-	// вертикальное «дыхание» игрока: разгон — вперёд, торможение — назад
+	// вертикальное «дыхание» игрока:
+	// разгон — вперёд, торможение — назад.
 	playerYBase  = screenHeight - carH - 30
 	playerYMax   = screenHeight - carH - 10
 	playerYMinF  = 0.45 // доля высоты экрана: выше середины не поднимаемся

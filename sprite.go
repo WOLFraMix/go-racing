@@ -112,43 +112,52 @@ func clamp255(v float64) float64 {
 }
 
 func init() {
-	const W, H = 128, 160
+	const W, H = 160, 180
 	src := image.NewRGBA(image.Rect(0, 0, W, H))
 	cx := float64(W) / 2
 	for y := 0; y < H; y++ {
 		t := float64(H-1-y) / float64(H-1) // 0 у машины, 1 на дальнем конце
 		fall := (1 - t) * (1 - t)          // свет тает к дальнему концу
-		half := 0.20 + 0.46*t              // конус расходится к дальнему концу
+		half := 0.20 + 0.44*t              // было 0.16 + 0.40*t — чуть шире
 		for x := 0; x < W; x++ {
 			dx := math.Abs(float64(x)+0.5-cx) / (float64(W) / 2)
-			f := (half - dx) / 0.16 // мягкий край вместо резкой границы
+			f := (half - dx) / 0.18 // мягкий край вместо резкой границы
 			if f > 1 {
 				f = 1
 			}
 			if f < 0 {
 				f = 0
 			}
-			a := uint8(clamp255(70 * fall * f))
-			if a == 0 {
+			intensity := fall * f
+			if intensity <= 0.004 {
 				continue
 			}
-			src.SetRGBA(x, y, color.RGBA{R: 255, G: 246, B: 212, A: a})
+			// премультиплированный цвет: RGB = цвет × альфа (тёплый белый)
+			a := 118 * intensity
+			src.SetRGBA(x, y, color.RGBA{
+				R: uint8(clamp255(a)),
+				G: uint8(clamp255(a * 0.96)),
+				B: uint8(clamp255(a * 0.82)),
+				A: uint8(clamp255(a)),
+			})
 		}
 	}
 	beamImg = ebiten.NewImageFromImage(src)
 }
 
-// drawHeadlights — мягкий рассеянный луч вперёд; рисуется ДО машин.
+// drawHeadlights — два луча от левой и правой фар; рисуется ДО машин.
 func drawHeadlights(dst *ebiten.Image, c Car) {
 	if beamImg == nil {
 		return
 	}
-	const length = 165.0
-	w := c.W * 1.9 // ненамного шире машины — луч не выпирает по бокам
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(w/128, length/160)
-	op.GeoM.Translate(c.X+c.W/2-w/2, c.Y-length)
-	dst.DrawImage(beamImg, op)
+	const length = 170.0
+	w := c.W * 1.35 // ширина каждого конуса: сливаются в один поток, но видно две лампы
+	for _, lx := range []float64{c.X + c.W*0.22, c.X + c.W*0.78} {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Scale(w/160, length/180)
+		op.GeoM.Translate(lx-w/2, c.Y-length)
+		dst.DrawImage(beamImg, op)
+	}
 }
 
 // drawTailLights — два задних фонаря со свечением. Ночью горят всегда;
@@ -190,6 +199,12 @@ func face(size float64) *text.GoTextFace {
 }
 
 func drawText(dst *ebiten.Image, s string, x, y int, size float64, clr color.Color) {
+	// тень для читаемости на любом фоне
+	sh := &text.DrawOptions{}
+	sh.GeoM.Translate(float64(x+2), float64(y+2))
+	sh.ColorScale.ScaleWithColor(color.RGBA{R: 0, G: 0, B: 0, A: 180})
+	text.Draw(dst, s, face(size), sh)
+
 	op := &text.DrawOptions{}
 	op.GeoM.Translate(float64(x), float64(y))
 	op.ColorScale.ScaleWithColor(clr)
@@ -197,6 +212,12 @@ func drawText(dst *ebiten.Image, s string, x, y int, size float64, clr color.Col
 }
 
 func drawTextCentered(dst *ebiten.Image, s string, y int, size float64, clr color.Color) {
+	sh := &text.DrawOptions{}
+	sh.GeoM.Translate(float64(screenWidth/2+2), float64(y+2))
+	sh.ColorScale.ScaleWithColor(color.RGBA{R: 0, G: 0, B: 0, A: 180})
+	sh.PrimaryAlign = text.AlignCenter
+	text.Draw(dst, s, face(size), sh)
+
 	op := &text.DrawOptions{}
 	op.GeoM.Translate(float64(screenWidth/2), float64(y))
 	op.ColorScale.ScaleWithColor(clr)
