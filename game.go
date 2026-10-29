@@ -533,10 +533,12 @@ func (g *Game) updatePlaying() {
 		g.banner -= dt
 	}
 
-	// страховочный фильтр цветов этапа: любой скачок цвета — где бы он
-	// ни возник — растягивается в плавный переход ~0.5 с
 	def = g.currentDef()
-	k := math.Min(1, 2.5*dt)
+
+	// страховочный фильтр: дорога всегда перетекает медленно,
+	// даже если выше по цепочке где-то ступенька
+	k := math.Min(1, 2.0*dt)
+
 	g.smGrass = lerpColor(g.smGrass, def.Grass, k)
 	g.smAsphalt = lerpColor(g.smAsphalt, def.Asphalt, k)
 	g.smMark = lerpColor(g.smMark, def.Mark, k)
@@ -785,6 +787,9 @@ func (g *Game) drawHUD(screen *ebiten.Image) {
 	cyan := color.RGBA{R: 120, G: 220, B: 255, A: 255}
 	grey := color.RGBA{R: 200, G: 200, B: 210, A: 255}
 	green := color.RGBA{R: 120, G: 255, B: 120, A: 255}
+
+	drawText(screen, fmt.Sprintf("A: %d %d %d N: %.2f",
+		g.smAsphalt.R, g.smAsphalt.G, g.smAsphalt.B, g.smNight), 12, 118, 14, grey)
 
 	drawText(screen, fmt.Sprintf("Score: %d", g.curScore()), 12, 10, 20, gold)
 	drawText(screen, fmt.Sprintf("Best: %d", g.highScore), 12, 38, 20, cyan)
