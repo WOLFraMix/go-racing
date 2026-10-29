@@ -48,23 +48,29 @@ func drawCar(dst *ebiten.Image, c Car, s *Sprite) {
 	vector.FillRect(dst, float32(c.X), float32(c.Y), float32(c.W), float32(c.H), s.Fill, false)
 }
 
-func drawBlinker(dst *ebiten.Image, c Car, blink, frame int) {
-	if blink == 0 || (frame/10)%2 != 0 {
+// drawBlinker — мигающие поворотники: задний и передний.
+// dir: -1 — влево, 1 — вправо. frame — для мигания.
+func drawBlinker(dst *ebiten.Image, c Car, dir int, frame int) {
+	if dir == 0 {
 		return
 	}
-	blinkCol := color.RGBA{R: 255, G: 150, B: 30, A: 255}
-	lampW := float32(7)
-	lampH := float32(10)
-	var lampX float32
-	if blink < 0 {
-		lampX = float32(c.X) - lampW - 1
-	} else {
-		lampX = float32(c.X + c.W + 1)
+	if (frame/20)%2 != 0 {
+		return
 	}
-	frontY := float32(c.Y + c.H*0.12)
-	rearY := float32(c.Y + c.H*0.82)
-	vector.FillRect(dst, lampX, frontY, lampW, lampH, blinkCol, false)
-	vector.FillRect(dst, lampX, rearY, lampW, lampH, blinkCol, false)
+
+	clr := color.RGBA{R: 255, G: 165, B: 30, A: 255}
+	const size = 10
+
+	// X: левый — выступ 3px за корпус, правый — нахлёст 3px внутрь
+	x := c.X - 3
+	if dir > 0 {
+		x = c.X + c.W - size + 3
+	}
+
+	// задний — на бампере
+	vector.FillRect(dst, float32(x), float32(c.Y+c.H-size-4), size, size, clr, false)
+	// передний — у капота, на той же стороне
+	vector.FillRect(dst, float32(x), float32(c.Y+4), size, size, clr, false)
 }
 
 func drawBrakeLights(dst *ebiten.Image, c Car, braking bool) {
