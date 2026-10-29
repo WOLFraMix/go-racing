@@ -20,6 +20,12 @@ const (
 	randomLaneChance = 0.001
 )
 
+const (
+	lookAhead   = 20.0 // запас дистанции в кадрах пути: чем больше, тем раньше тормозит
+	followDecel = 0.08 // мягкое торможение за кадр у цели дистанции
+	hardDecel   = 0.35 // экстренное торможение за кадр, когда вплотную
+)
+
 type CarKind int
 
 const (
@@ -221,14 +227,12 @@ func (g *Game) leaderInfo(e Car) (idx int, gap float64, isPlayer bool) {
 	return idx, bestGap, isPlayer
 }
 
-// updateEnemies — ИИ, перемещение и страховка от наездов. Все константы —
-// «за кадр при 60 FPS», умножаются на dt.
 func (g *Game) updateEnemies(eff, dt float64) {
 	for i := range g.enemies {
 		e := &g.enemies[i]
 
-		// движение при перестроении
 		if e.TargetLane != e.Lane {
+			// боковое перестроение: двигаем X, скорость не трогаем
 			tx := laneCenterX(e.TargetLane, e.W)
 			dx := tx - e.X
 			step := laneChangeSpeed * dt
@@ -242,7 +246,6 @@ func (g *Game) updateEnemies(eff, dt float64) {
 			} else {
 				e.X -= step
 			}
-			e.Braking = false
 		} else if e.BlinkTimer > 0 {
 			e.BlinkTimer -= dt
 			if e.BlinkTimer <= 0 {
@@ -253,37 +256,75 @@ func (g *Game) updateEnemies(eff, dt float64) {
 			e.Cooldown -= dt
 		}
 
-		if e.TargetLane != e.Lane || e.Cooldown > 0 {
+		// в самом боковом манёвре скорость не управляем,
+		// но в кулдауне после него — управляем ОБЯЗАТЕЛЬНО:
+		// раньше здесь стоял continue, из-за которого машина
+		// после перестроения летела вперёд без тормозов
+		if e.TargetLane != e.Lane {
 			continue
 		}
 
 		leaderIdx, gap, leaderIsPlayer := g.leaderInfo(*e)
 
-		var leadSpeed float64
-		if leaderIdx >= 0 {
-			leadSpeed = g.enemies[leaderIdx].OwnSpeed
-		} else if leaderIsPlayer {
-			leadSpeed = eff
-		}
+		if leaderIdx >= 0 || leaderIsPlayer {
+			leadSpeed := 0.0
+			if leaderIdx >= 0 {
+				leadSpeed = g.enemies[leaderIdx].OwnSpeed
+			} else {
+				leadSpeed = eff
+			}
 
-		closeCall := (leaderIdx >= 0 || leaderIsPlayer) &&
-			e.OwnSpeed > leadSpeed+0.05 &&
-			gap < safeGap
+			// желаемая дистанция: safeGap + запас на скорость сближения.
+			// dc > 0 — догоняем лидера: тормозим ЗАРАНЕЕ, а не на пороге.
+			dc := e.OwnSpeed - leadSpeed
+			desired := safeGap + dc*lookAhead
+			if desired < safeGap {
+				desired = safeGap
+			}
 
-		if closeCall {
-			if !g.tryLaneChange(e, i) {
-				e.Braking = true
-				e.OwnSpeed -= 0.05 * dt
-				if e.OwnSpeed < leadSpeed {
-					e.OwnSpeed = leadSpeed
-				}
-				if e.OwnSpeed < 0.2 {
-					e.OwnSpeed = 0.2
+			if gap < desired {
+				// манёвр возможен только вне кулдауна; иначе — тормозим
+				if e.Cooldown > 0 || !g.tryLaneChange(e, i) {
+					e.Braking = true
+					// не быстрее лидера, пока дистанция меньше желаемой
+					if e.OwnSpeed > leadSpeed {
+						e.OwnSpeed = leadSpeed
+					}
+					// при малом запасе пути гасим сближение на оставшемся
+					// расстоянии: need — тормозной путь dc, который нужно
+					// успеть погасить до safeGap
+					if gap < safeGap*2 {
+						margin := gap - safeGap
+						need := 0.0
+						if margin > 1 {
+							need = dc * dc / margin
+						}
+						decel := followDecel + need
+						if decel > hardDecel {
+							decel = hardDecel
+						}
+						e.OwnSpeed -= decel * dt
+					}
+					if e.OwnSpeed < 0.05 {
+						e.OwnSpeed = 0.05
+					}
+				} else {
+					e.Braking = false
 				}
 			} else {
 				e.Braking = false
+				if e.OwnSpeed < e.BaseOwn {
+					e.OwnSpeed += 0.02 * dt
+					if e.OwnSpeed > e.BaseOwn {
+						e.OwnSpeed = e.BaseOwn
+					}
+				}
+				if e.Cooldown <= 0 && rand.Float64() < randomLaneChance*dt {
+					g.tryLaneChange(e, i)
+				}
 			}
 		} else {
+			// впереди никого — едем как раньше
 			e.Braking = false
 			if e.OwnSpeed < e.BaseOwn {
 				e.OwnSpeed += 0.02 * dt
@@ -297,20 +338,21 @@ func (g *Game) updateEnemies(eff, dt float64) {
 		}
 	}
 
-	// перемещение вниз
+	// перемещение вниз.
+	// Пол 0.4 действует только когда машина НЕ тормозит за лидером:
+	// тормозящей машине пол запрещает стоять на месте —
+	// именно он и вползал её в переднюю.
 	for i := range g.enemies {
 		e := &g.enemies[i]
 		rel := eff - e.OwnSpeed
-		if rel < 0.4 {
+		if rel < 0.4 && !e.Braking {
 			rel = 0.4
 		}
 		e.Y += rel * dt
 	}
 
-	// страховка от наездов:
-	// a — та, что позади (Y меньше, выше на экране), b — впереди.
-	// Нос a (a.Y + a.H) не должен заходить за хвост b (b.Y):
-	// при пересечении a останавливается СЗАДИ, прижав нос к хвосту b.
+	// страховка от наездов — последняя линия обороны.
+	// При нормальном следовании срабатывать не должна.
 	for i := range g.enemies {
 		a := &g.enemies[i]
 		for j := range g.enemies {
@@ -321,7 +363,6 @@ func (g *Game) updateEnemies(eff, dt float64) {
 			if a.Y > b.Y || !xOverlap(*a, *b) {
 				continue
 			}
-			// реальное пересечение по вертикали: нос a зашёл за хвост b
 			if a.Y+a.H > b.Y {
 				a.Y = b.Y - a.H
 				if a.OwnSpeed > b.OwnSpeed {
