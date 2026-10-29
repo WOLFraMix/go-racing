@@ -20,7 +20,7 @@ var stageDefs = []StageDef{
 	{Name: "CITY", Grass: color.RGBA{R: 56, G: 118, B: 58, A: 255}, Asphalt: color.RGBA{R: 72, G: 74, B: 84, A: 255}, Mark: color.RGBA{R: 225, G: 225, B: 230, A: 255}, Night: 0, ScrollStart: 260, ScrollMax: 520, Duration: 20},
 	{Name: "DESERT", Grass: color.RGBA{R: 214, G: 190, B: 140, A: 255}, Asphalt: color.RGBA{R: 124, G: 112, B: 98, A: 255}, Mark: color.RGBA{R: 228, G: 214, B: 186, A: 255}, Night: 0, ScrollStart: 285, ScrollMax: 545, Duration: 14},
 	{Name: "HIGHWAY", Grass: color.RGBA{R: 110, G: 128, B: 86, A: 255}, Asphalt: color.RGBA{R: 76, G: 78, B: 88, A: 255}, Mark: color.RGBA{R: 225, G: 225, B: 230, A: 255}, Night: 0, ScrollStart: 310, ScrollMax: 580, Duration: 14},
-	{Name: "DUSK", Grass: color.RGBA{R: 62, G: 92, B: 64, A: 255}, Asphalt: color.RGBA{R: 58, G: 58, B: 76, A: 255}, Mark: color.RGBA{R: 205, G: 200, B: 190, A: 255}, Night: 0.45, ScrollStart: 290, ScrollMax: 550, Duration: 14},
+	{Name: "DUSK", Grass: color.RGBA{R: 62, G: 92, B: 64, A: 255}, Asphalt: color.RGBA{R: 62, G: 64, B: 82, A: 255}, Mark: color.RGBA{R: 205, G: 200, B: 190, A: 255}, Night: 0.4, ScrollStart: 290, ScrollMax: 550, Duration: 14},
 	{Name: "NIGHT", Grass: color.RGBA{R: 14, G: 16, B: 30, A: 255}, Asphalt: color.RGBA{R: 30, G: 32, B: 48, A: 255}, Mark: color.RGBA{R: 150, G: 150, B: 165, A: 255}, Night: 1, ScrollStart: 330, ScrollMax: 600, Duration: 14},
 	{Name: "DAWN", Grass: color.RGBA{R: 82, G: 108, B: 74, A: 255}, Asphalt: color.RGBA{R: 62, G: 64, B: 80, A: 255}, Mark: color.RGBA{R: 210, G: 205, B: 195, A: 255}, Night: 0.45, ScrollStart: 300, ScrollMax: 560, Duration: 14},
 }
@@ -52,23 +52,47 @@ func blendDefs(a, b StageDef, t float64) StageDef {
 	}
 }
 
-// stageTransition — последние секунды этапа плавно перетекают в следующий.
-const stageTransition = 4.0
+// stageTransition — общая длительность кроссфейда: половина течёт
+// в конце старого этапа, половина — в начале нового.
+const stageTransition = 10.0
 
-// currentDef — определение этапа с учётом кроссфейда на стыке.
-func (g *Game) currentDef() StageDef {
-	def := stageDefs[g.stageIdx]
-	next := stageDefs[(g.stageIdx+1)%len(stageDefs)]
-	remain := def.Duration - g.stageTime
-	if remain < stageTransition {
-		t := 1 - remain/stageTransition
-		if t < 0 {
-			t = 0
-		}
-		if t > 1 {
-			t = 1
-		}
-		return blendDefs(def, next, t)
+// smooth — сглаживание (smoothstep): на краях окна изменение замирает.
+func smooth(t float64) float64 {
+	if t < 0 {
+		t = 0
 	}
-	return def
+	if t > 1 {
+		t = 1
+	}
+	return t * t * (3 - 2*t)
+}
+
+// stageBlend — фаза кроссфейда: индексы этапов и степень t (0..1).
+// Окно центрировано на границе этапов: в момент смены t = 0.5 ровно,
+// наклон кривой в этой точке нулевой — скачка нет по построению.
+func (g *Game) stageBlend() (int, int, float64) {
+	n := len(stageDefs)
+	cur := g.stageIdx
+	T := stageTransition
+	half := T / 2
+
+	if g.stageTime < half {
+		// этап только сменился: дожимаем переход от предыдущего
+		return (cur + n - 1) % n, cur, 0.5 + 0.5*smooth(g.stageTime/half)
+	}
+	remain := stageDefs[cur].Duration - g.stageTime
+	if remain < half {
+		// конец этапа: начинаем переход к следующему
+		return cur, (cur + 1) % n, 0.5 * (1 - smooth(remain/half))
+	}
+	return cur, cur, 0
+}
+
+// currentDef — этап с учётом кроссфейда на стыке.
+func (g *Game) currentDef() StageDef {
+	ai, bi, t := g.stageBlend()
+	if ai == bi {
+		return stageDefs[ai]
+	}
+	return blendDefs(stageDefs[ai], stageDefs[bi], t)
 }

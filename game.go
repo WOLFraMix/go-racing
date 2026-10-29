@@ -122,6 +122,9 @@ type Game struct {
 	// фронт затора для ремонта: заполняется passPath при провале
 	wallBand  int
 	wallLanes uint8
+
+	smGrass, smAsphalt, smMark color.RGBA
+	smNight                    float64
 }
 
 // ---------- загрузка спрайтов ----------
@@ -193,6 +196,10 @@ func (g *Game) reset(startStage int) {
 		H:    carH,
 		Kind: KindPlayer,
 	}
+	g.stageIdx = startStage % len(stageDefs)
+	d := stageDefs[g.stageIdx]
+	g.smGrass, g.smAsphalt, g.smMark = d.Grass, d.Asphalt, d.Mark
+	g.smNight = d.Night
 	g.enemies = nil
 	g.sparks = nil
 	g.boost = 0
@@ -202,8 +209,7 @@ func (g *Game) reset(startStage int) {
 	g.bonus = 0
 	g.distance = 0
 	g.markOffset = 0
-	g.stageIdx = startStage % len(stageDefs)
-	g.stageTime = 0
+	g.stageTime = stageTransition / 2
 	g.stageLoop = 0
 	g.banner = 2.0
 	g.scrollSpeed = stageDefs[g.stageIdx].ScrollStart
@@ -527,6 +533,15 @@ func (g *Game) updatePlaying() {
 		g.banner -= dt
 	}
 
+	// страховочный фильтр цветов этапа: любой скачок цвета — где бы он
+	// ни возник — растягивается в плавный переход ~0.5 с
+	def = g.currentDef()
+	k := math.Min(1, 2.5*dt)
+	g.smGrass = lerpColor(g.smGrass, def.Grass, k)
+	g.smAsphalt = lerpColor(g.smAsphalt, def.Asphalt, k)
+	g.smMark = lerpColor(g.smMark, def.Mark, k)
+	g.smNight += (def.Night - g.smNight) * k
+
 	// плавный разгон внутри этапа
 	prog := math.Min(1, g.stageTime/def.Duration)
 	target := def.ScrollStart + (def.ScrollMax-def.ScrollStart)*prog
@@ -701,8 +716,8 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	// хитбокс всегда совпадают, отдельного визуального сдвига нет.
 	playerDraw := g.player
 
-	vector.FillRect(screen, 0, 0, screenWidth, screenHeight, def.Grass, false)
-	vector.FillRect(screen, roadX0, 0, roadX1-roadX0, screenHeight, def.Asphalt, false)
+	vector.FillRect(screen, 0, 0, screenWidth, screenHeight, g.smGrass, false)
+	vector.FillRect(screen, roadX0, 0, roadX1-roadX0, screenHeight, g.smAsphalt, false)
 
 	edge := color.RGBA{R: 235, G: 235, B: 240, A: 255}
 	vector.FillRect(screen, roadX0+2, 0, 3, screenHeight, edge, false)
@@ -714,20 +729,20 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 		y := frac + float64(j)*spacing
 		for l := 1; l < laneCount; l++ {
 			x := roadX0 + laneWidth*l - 2
-			vector.FillRect(screen, float32(x), float32(y), 4, dashLen, def.Mark, false)
+			vector.FillRect(screen, float32(x), float32(y), 4, dashLen, g.smMark, false)
 		}
 	}
 
 	g.drawScenery(screen, def)
 
-	// ночь: затемнение и лучи фар — до машин, чтобы лучи лежали под корпусом
-	dark := def.Night
-	if dark > 0.02 {
+	// ночь: затемнение, лучи фар и габариты — без порогов, свет
+	// разгорается плавно с первых сумерек. Порог здесь давал вспышку
+	// ровно на стыке HIGHWAY→DUSK: Night пересекает 0.2 точно на границе
+	dark := g.smNight
+	if dark > 0.001 {
 		vector.FillRect(screen, 0, 0, screenWidth, screenHeight,
 			color.RGBA{R: 8, G: 10, B: 30, A: uint8(110 * dark)}, false)
-	}
-	if dark > 0.2 {
-		k := (dark - 0.2) / 0.8
+		k := dark * dark // парабола: в сумерках тускло, ночью — в полную
 		for _, e := range g.enemies {
 			drawHeadlights(screen, e, float32(k))
 		}
@@ -744,8 +759,8 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	drawCar(screen, playerDraw, ps.Img)
 	drawBrakeLights(screen, playerDraw, g.playerBraking)
 
-	// ночь: габариты и стоп-сигналы — после машин, поверх корпуса
-	if dark > 0.2 {
+	// габариты и стоп-сигналы — после машин, поверх корпуса
+	if dark > 0.001 {
 		for _, e := range g.enemies {
 			drawTailLights(screen, e, e.Braking)
 		}

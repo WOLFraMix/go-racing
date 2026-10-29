@@ -24,29 +24,12 @@ func hashIdx(idx int) int {
 }
 
 func (g *Game) drawScenery(screen *ebiten.Image, def StageDef) {
-	// фаза кроссфейда: те же 0..1, что и у цветов в currentDef
-	cur := g.stageIdx
-	next := (cur + 1) % len(stageDefs)
-	t := 0.0
-	remain := stageDefs[cur].Duration - g.stageTime
-	if remain < stageTransition {
-		t = 1 - remain/stageTransition
-		if t < 0 {
-			t = 0
-		}
-		if t > 1 {
-			t = 1
-		}
-	}
-
-	if t <= 0.001 {
-		g.drawDecorAlpha(screen, stageDefs[cur].Name, 1)
-	} else if t >= 0.999 {
-		g.drawDecorAlpha(screen, stageDefs[next].Name, 1)
+	ai, bi, t := g.stageBlend()
+	if ai == bi || t <= 0.001 {
+		g.drawDecorAlpha(screen, stageDefs[ai].Name, 1)
 	} else {
-		// старые декорации тают, новые проявляются — одновременно
-		g.drawDecorAlpha(screen, stageDefs[cur].Name, 1-t)
-		g.drawDecorAlpha(screen, stageDefs[next].Name, t)
+		g.drawDecorAlpha(screen, stageDefs[ai].Name, 1-t)
+		g.drawDecorAlpha(screen, stageDefs[bi].Name, t)
 	}
 }
 
