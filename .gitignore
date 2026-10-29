@@ -15,3 +15,4 @@ instruction.txt
 *.log
 Thumbs.db
 .DS_Store
+highscore.json

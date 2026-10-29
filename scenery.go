@@ -40,7 +40,9 @@ func (g *Game) drawScenery(screen *ebiten.Image, def StageDef) {
 		h := hashIdx(idx)
 
 		switch def.Name {
-		case "CITY":
+		case "CITY", "DAWN":
+			g.drawCityRow(screen, y, h)
+		case "DUSK":
 			g.drawCityRow(screen, y, h)
 		case "HIGHWAY":
 			g.drawHighwayRow(screen, y, h)

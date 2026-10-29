@@ -1,131 +1,134 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"image"
 	"image/color"
+	_ "image/png"
 	"math"
 	"math/rand"
+	"os"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
+// ---------- константы экрана и дороги ----------
+
 const (
-	screenWidth  = 430
+	screenWidth  = 520
 	screenHeight = 1000
 
-	roadMargin = 12
-	roadX0     = roadMargin
-	roadX1     = screenWidth - roadMargin
-	roadW      = roadX1 - roadX0
-
+	roadX0    = 40
+	roadX1    = 460
 	laneCount = 6
-	laneWidth = roadW / laneCount
+	laneWidth = (roadX1 - roadX0) / laneCount // 70
 
-	// вертикальное «дыхание» игрока:
-	// разгон — вперёд, торможение — назад.
-	playerYBase  = screenHeight - carH - 30
-	playerYMax   = screenHeight - carH - 10
-	playerYMinF  = 0.45 // доля высоты экрана: выше середины не поднимаемся
-	playerYReach = 26.0 // пикселей смещения на 1.0 boost
-	playerYEase  = 0.08 // плавность возврата
-
-	stageClearBonus = 25
-	bannerDuration  = 2.5 // секунды показа баннера STAGE CLEAR
+	playerYBase = screenHeight - 210
 )
 
-type GameState int
+type State int
 
 const (
-	StateMenu GameState = iota
+	StateMenu State = iota
 	StatePlaying
 	StatePaused
 	StateGameOver
 )
 
+// spark — искра взрыва. Своя мини-система, чтобы не зависеть от полей
+// Particle из particle.go.
+type spark struct {
+	X, Y, Vx, Vy    float64
+	Life, Max, Size float64
+	Clr             color.RGBA
+}
+
 type Game struct {
-	state       GameState
-	player      Car
-	enemies     []Car
-	particles   []Particle
-	sprites     map[CarKind]*Sprite
-	playerSkins []*Sprite
-	skinNames   []string
-	skinIdx     int
+	state State
 
-	scrollSpeed float64
-	boost       float64
-	spawnTimer  float64
-	markOffset  float64
-	frame       float64 // игровые кадры (в единицах 60 FPS) — для фаз мигания
+	player  Car
+	enemies []Car
+	sparks  []spark
 
-	score     int
+	// оставлено для совместимости с particle.go — здесь не используется
+	particles []Particle
+
 	highScore int
+	bonus     int
 	distance  float64
 
-	startStage int
+	scrollSpeed float64
+	spawnTimer  float64
+	markOffset  float64
 
-	playerBraking bool
-
-	// этапы
 	stageIdx  int
 	stageTime float64
 	stageLoop int
-	banner    float64 // таймер баннера, в игровых кадрах
+	banner    float64
+
+	boost         float64
+	playerBraking bool
+
+	frame float64
+
+	muted      bool
+	skinIdx    int
+	startStage int
 
 	audio *AudioSys
-	muted bool
+
+	sprites     map[CarKind]Sprite
+	playerSkins []Sprite
+	skinNames   []string
 }
+
+// ---------- загрузка спрайтов ----------
+
+func loadSprite(path string, fallback color.RGBA) Sprite {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Sprite{Fill: fallback}
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return Sprite{Fill: fallback}
+	}
+	return Sprite{Img: ebiten.NewImageFromImage(img), Fill: fallback}
+}
+
+// ---------- создание и сброс ----------
 
 func NewGame() *Game {
-	g := &Game{}
-	g.loadSprites()
-	g.loadSkins()
-	g.readSettings()
-	if g.skinIdx >= len(g.playerSkins) || g.skinIdx < 0 {
-		g.skinIdx = 0
+	g := &Game{
+		state: StateMenu,
+		audio: NewAudio(),
+		sprites: map[CarKind]Sprite{
+			KindSedan:     loadSprite("assets/car_sedan.png", color.RGBA{R: 170, G: 60, B: 55, A: 255}),
+			KindSport:     loadSprite("assets/car_sport.png", color.RGBA{R: 220, G: 170, B: 40, A: 255}),
+			KindSUV:       loadSprite("assets/car_suv.png", color.RGBA{R: 55, G: 120, B: 75, A: 255}),
+			KindBus:       loadSprite("assets/bus.png", color.RGBA{R: 235, G: 185, B: 40, A: 255}),
+			KindMinibus:   loadSprite("assets/minibus.png", color.RGBA{R: 220, G: 225, B: 230, A: 255}),
+			KindTruck:     loadSprite("assets/truck.png", color.RGBA{R: 130, G: 135, B: 145, A: 255}),
+			KindAmbulance: loadSprite("assets/ambulance.png", color.RGBA{R: 240, G: 244, B: 248, A: 255}),
+		},
 	}
-	g.audio = NewAudio()
-	g.readHighScore()
-	return g
-}
-
-func (g *Game) loadSprites() {
-	g.sprites = map[CarKind]*Sprite{
-		KindSedan:     LoadSprite("car_sedan.png", color.RGBA{R: 200, G: 60, B: 60, A: 255}),
-		KindSport:     LoadSprite("car_sport.png", color.RGBA{R: 60, G: 120, B: 220, A: 255}),
-		KindSUV:       LoadSprite("car_suv.png", color.RGBA{R: 80, G: 150, B: 80, A: 255}),
-		KindMinibus:   LoadSprite("minibus.png", color.RGBA{R: 240, G: 200, B: 60, A: 255}),
-		KindBus:       LoadSprite("bus.png", color.RGBA{R: 70, G: 140, B: 80, A: 255}),
-		KindAmbulance: LoadSprite("ambulance.png", color.RGBA{R: 245, G: 245, B: 245, A: 255}),
-		KindTruck:     LoadSprite("truck.png", color.RGBA{R: 220, G: 160, B: 40, A: 255}),
-	}
-}
-
-func (g *Game) loadSkins() {
 	for _, m := range skinMeta {
-		g.playerSkins = append(g.playerSkins, LoadSprite(m.file, m.fallback))
+		g.playerSkins = append(g.playerSkins, loadSprite("assets/"+m.file, m.fallback))
 		g.skinNames = append(g.skinNames, m.name)
 	}
-}
-
-// timeScale — множитель времени относительно 60 FPS. На 144 Гц ≈ 2.4,
-// на 60 Гц = 1. Все константы движения в коде рассчитаны на 60 FPS
-// и умножаются на dt, поэтому скорость игры одинакова на любом мониторе.
-func (g *Game) timeScale() float64 {
-	tps := ebiten.ActualTPS()
-	if tps <= 1 {
-		return 1
+	g.readSettings()
+	g.readHighScore()
+	if g.skinIdx < 0 || g.skinIdx >= len(g.playerSkins) {
+		g.skinIdx = 0
 	}
-	s := tps / 60.0
-	if s < 0.5 {
-		s = 0.5
+	if g.startStage < 0 || g.startStage >= len(stageDefs) {
+		g.startStage = 0
 	}
-	if s > 3 {
-		s = 3
-	}
-	return s
+	g.reset(g.startStage)
+	return g
 }
 
 func (g *Game) reset(startStage int) {
@@ -137,36 +140,22 @@ func (g *Game) reset(startStage int) {
 		Kind: KindPlayer,
 	}
 	g.enemies = nil
-	g.particles = nil
+	g.sparks = nil
 	g.boost = 0
-	g.spawnTimer = 0
-	g.score = 0
+	g.spawnTimer = 0.8
+	g.bonus = 0
 	g.distance = 0
+	g.markOffset = 0
 	g.stageIdx = startStage % len(stageDefs)
 	g.stageTime = 0
 	g.stageLoop = 0
-	g.banner = 0
+	g.banner = 2.0
 	g.scrollSpeed = stageDefs[g.stageIdx].ScrollStart
 	g.readHighScore()
 }
 
-func (g *Game) effectiveSpeed() float64 {
-	eff := g.scrollSpeed + g.boost
-	if eff < 1.2 {
-		eff = 1.2
-	}
-	if eff > g.scrollSpeed+boostMax {
-		eff = g.scrollSpeed + boostMax
-	}
-	return eff
-}
-
-func (g *Game) stageName(i int) string {
-	name := stageDefs[i].Name
-	if g.stageLoop > 0 {
-		name = fmt.Sprintf("%s · LAP %d", name, g.stageLoop+1)
-	}
-	return name
+func (g *Game) curScore() int {
+	return int(g.distance/10) + g.bonus
 }
 
 // ---------- Update: диспетчер состояний ----------
@@ -174,196 +163,198 @@ func (g *Game) stageName(i int) string {
 func (g *Game) Update() error {
 	switch g.state {
 	case StateMenu:
+		g.audio.SilenceEngine() // в меню мотор молчит
 		return g.updateMenu()
 	case StatePlaying:
 		g.updatePlaying()
 	case StatePaused:
-		return g.updatePaused()
+		g.audio.SilenceEngine()
+		g.updatePaused()
 	case StateGameOver:
+		g.audio.SilenceEngine()
 		g.updateGameOver()
 	}
 	return nil
 }
 
-func (g *Game) updatePlaying() {
-	dt := g.timeScale()
-	g.frame += dt
+func (g *Game) Draw(screen *ebiten.Image) {
+	switch g.state {
+	case StateMenu:
+		g.drawMenu(screen)
+	default:
+		g.drawWorld(screen)
+		g.drawHUD(screen)
+		if g.banner > 0 {
+			g.drawBanner(screen)
+		}
+		if g.state == StatePaused {
+			g.drawPause(screen)
+		}
+		if g.state == StateGameOver {
+			g.drawGameOver(screen)
+		}
+	}
+}
 
-	// пауза
-	if inpututil.IsKeyJustPressed(ebiten.KeyP) || inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
+	return screenWidth, screenHeight
+}
+
+// ---------- игровая логика ----------
+
+func (g *Game) updatePlaying() {
+	dt := 1.0 / 60.0
+	g.frame++
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyP) {
 		g.state = StatePaused
-		g.audio.SilenceEngine()
 		return
 	}
-	// звук вкл/выкл
 	if inpututil.IsKeyJustPressed(ebiten.KeyM) {
 		g.muted = !g.muted
 		g.saveSettings()
 	}
 
-	g.updateParticles(dt)
-
-	// разгон / торможение игрока
-	up := ebiten.IsKeyPressed(ebiten.KeyUp) || ebiten.IsKeyPressed(ebiten.KeyW)
-	down := ebiten.IsKeyPressed(ebiten.KeyDown) || ebiten.IsKeyPressed(ebiten.KeyS)
-	g.playerBraking = down && !up
-	switch {
-	case up && !down:
-		g.boost += boostGain * dt
-	case down && !up:
-		g.boost -= brakeGain * dt
-	default:
-		if g.boost > 0 {
-			g.boost -= boostGain * dt
-			if g.boost < 0 {
-				g.boost = 0
-			}
-		} else {
-			g.boost += brakeGain * dt
-			if g.boost > 0 {
-				g.boost = 0
-			}
-		}
-	}
-	if g.boost > boostMax {
-		g.boost = boostMax
-	}
-	if g.boost < -brakeMax {
-		g.boost = -brakeMax
-	}
-
-	// вертикальное положение: газ — вперёд, тормоз — назад
-	targetY := float64(playerYBase) - g.boost*playerYReach
-	if targetY < float64(screenHeight)*playerYMinF {
-		targetY = float64(screenHeight) * playerYMinF
-	}
-	if targetY > float64(playerYMax) {
-		targetY = float64(playerYMax)
-	}
-	g.player.Y += (targetY - g.player.Y) * math.Min(1, playerYEase*dt)
-
-	// движение влево-вправо
-	move := 0.0
+	// руль: поворотник в «кадрах», как у врагов
+	const steer = 340.0
 	if ebiten.IsKeyPressed(ebiten.KeyLeft) || ebiten.IsKeyPressed(ebiten.KeyA) {
-		move -= playerSpeed
+		g.player.X -= steer * dt
+		g.player.Blink = -1
+		g.player.BlinkTimer = 36
 	}
 	if ebiten.IsKeyPressed(ebiten.KeyRight) || ebiten.IsKeyPressed(ebiten.KeyD) {
-		move += playerSpeed
+		g.player.X += steer * dt
+		g.player.Blink = 1
+		g.player.BlinkTimer = 36
 	}
-	g.player.X += move * dt
-	if g.player.X < float64(roadX0+2) {
-		g.player.X = float64(roadX0 + 2)
+	if g.player.BlinkTimer > 0 {
+		g.player.BlinkTimer -= 60 * dt
 	}
-	if maxX := float64(roadX1 - carW - 2); g.player.X > maxX {
-		g.player.X = maxX
-	}
+	g.player.X = clamp(g.player.X, float64(roadX0+4), float64(roadX1-4-carW))
 
-	eff := g.effectiveSpeed()
-	g.markOffset += eff * dt
-	g.distance += eff * dt * 5 / 60 // условные метры (eff*18 км/ч → м/с)
-
-	g.updateStage(dt)
-
-	// спавн: интервал зависит от этапа и круга
-	every := stageDefs[g.stageIdx].SpawnEvery - float64(g.stageLoop)*15
-	if every < 110 {
-		every = 110
-	}
-	g.spawnTimer += eff * dt
-	if g.spawnTimer > every {
-		g.spawnTimer = 0
-		g.spawnEnemy()
+	// газ и тормоз
+	g.playerBraking = ebiten.IsKeyPressed(ebiten.KeyS) || ebiten.IsKeyPressed(ebiten.KeyDown)
+	if ebiten.IsKeyPressed(ebiten.KeyW) || ebiten.IsKeyPressed(ebiten.KeyUp) {
+		g.boost += (1 - g.boost) * math.Min(1, 5*dt)
+	} else {
+		g.boost += (0 - g.boost) * math.Min(1, 4*dt)
 	}
 
-	g.updateEnemies(eff, dt)
-
-	// ближний обгон + уехавшие за экран
-	kept := g.enemies[:0]
-	for _, e := range g.enemies {
-		if !e.NearMiss && e.Y+e.H > g.player.Y {
-			e.NearMiss = true
-			dx := math.Abs((e.X + e.W/2) - (g.player.X + g.player.W/2))
-			if dx < (e.W+g.player.W)/2+8 {
-				g.score += 1
-			}
-		}
-		if e.Y > float64(screenHeight) {
-			g.score += e.Points
-			continue
-		}
-		kept = append(kept, e)
-	}
-	g.enemies = kept
-	if g.score > g.highScore {
-		g.highScore = g.score
-	}
-
-	// столкновения
-	for _, e := range g.enemies {
-		if hit(g.player, e) {
-			g.state = StateGameOver
-			g.saveHighScore()
-			g.audio.PlayCrash(0.5, g.muted)
-			g.audio.SilenceEngine()
-			g.explode(g.player.X+g.player.W/2, g.player.Y+g.player.H/2)
-			break
-		}
-	}
-
-	g.audio.UpdateEngine(eff, g.boost, dt, g.playerBraking, g.muted)
-}
-
-func (g *Game) updateStage(dt float64) {
+	// смена этапа
 	def := stageDefs[g.stageIdx]
 	g.stageTime += dt
-
-	// плавный разгон внутри этапа + усложнение с каждым кругом
-	k := g.stageTime / def.Frames
-	if k > 1 {
-		k = 1
-	}
-	g.scrollSpeed = def.ScrollStart + (def.ScrollEnd-def.ScrollStart)*k +
-		float64(g.stageLoop)*0.3
-
-	if g.stageTime >= def.Frames {
-		g.score += stageClearBonus
-		if g.score > g.highScore {
-			g.highScore = g.score
-		}
-		g.saveHighScore()
-		g.banner = bannerDuration * 60
-		g.stageIdx++
-		if g.stageIdx >= len(stageDefs) {
-			g.stageIdx = 0
+	if g.stageTime >= def.Duration {
+		g.stageTime = 0
+		g.stageIdx = (g.stageIdx + 1) % len(stageDefs)
+		if g.stageIdx == 0 {
 			g.stageLoop++
 		}
-		g.stageTime = 0
-		g.spawnTimer = 0
+		g.banner = 2.0
 	}
 	if g.banner > 0 {
 		g.banner -= dt
 	}
+
+	// плавный разгон внутри этапа
+	prog := math.Min(1, g.stageTime/def.Duration)
+	target := def.ScrollStart + (def.ScrollMax-def.ScrollStart)*prog
+	g.scrollSpeed += (target - g.scrollSpeed) * math.Min(1, 2*dt)
+	eff := g.scrollSpeed * (1 + 0.35*g.boost)
+	if g.playerBraking {
+		eff *= 0.6
+	}
+
+	// мир едет
+	mark := eff * dt
+	g.markOffset += mark
+	g.distance += mark / 30
+
+	// звук мотора
+	g.audio.UpdateEngine(eff/100, g.boost, dt, g.playerBraking, g.muted)
+
+	// спавн врагов
+	g.spawnTimer -= dt
+	if g.spawnTimer <= 0 {
+		g.spawnEnemy()
+		g.spawnTimer = (260 + rand.Float64()*260) / math.Max(eff, 1)
+	}
+
+	// ИИ врагов: eff/60 — px за кадр (единицы OwnSpeed), 60*dt — dt в кадрах
+	g.updateEnemies(eff/60.0, 60.0*dt)
+
+	// ближний обгон, столкновения, вылет за экран
+	for i := len(g.enemies) - 1; i >= 0; i-- {
+		e := &g.enemies[i]
+
+		if !e.NearMiss && e.Y+e.H > g.player.Y && e.Y < g.player.Y+g.player.H {
+			e.NearMiss = true
+			dx := math.Abs((e.X + e.W/2) - (g.player.X + g.player.W/2))
+			if dx < (e.W+g.player.W)/2+10 {
+				g.bonus += e.Points
+			}
+		}
+
+		if hit(g.player, *e) {
+			g.crash()
+			return
+		}
+
+		if e.Y > screenHeight+200 {
+			g.enemies = append(g.enemies[:i], g.enemies[i+1:]...)
+		}
+	}
+
+	// искры взрыва
+	for i := len(g.sparks) - 1; i >= 0; i-- {
+		p := &g.sparks[i]
+		p.X += p.Vx * dt
+		p.Y += p.Vy * dt
+		p.Vx *= 0.98
+		p.Vy = p.Vy*0.98 + 60*dt
+		p.Life -= dt
+		if p.Life <= 0 {
+			g.sparks = append(g.sparks[:i], g.sparks[i+1:]...)
+		}
+	}
 }
 
-func (g *Game) updatePaused() error {
-	if inpututil.IsKeyJustPressed(ebiten.KeyP) || inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+func (g *Game) crash() {
+	g.audio.PlayCrash(0.5, g.muted)
+	cx, cy := g.player.X+g.player.W/2, g.player.Y+g.player.H/2
+	for i := 0; i < 46; i++ {
+		ang := rand.Float64() * 2 * math.Pi
+		sp := 60 + rand.Float64()*260
+		life := 0.5 + rand.Float64()*0.6
+		col := color.RGBA{R: 255, G: uint8(120 + rand.Intn(120)), B: 40, A: 255}
+		if rand.Intn(3) == 0 {
+			col = color.RGBA{R: 90, G: 90, B: 95, A: 255}
+		}
+		g.sparks = append(g.sparks, spark{
+			X: cx, Y: cy,
+			Vx:   math.Cos(ang) * sp,
+			Vy:   math.Sin(ang)*sp - 60,
+			Life: life, Max: life,
+			Size: 2 + rand.Float64()*3,
+			Clr:  col,
+		})
+	}
+	if g.curScore() > g.highScore {
+		g.highScore = g.curScore()
+		g.saveHighScore()
+	}
+	g.state = StateGameOver
+}
+
+func (g *Game) updatePaused() {
+	if inpututil.IsKeyJustPressed(ebiten.KeyP) {
 		g.state = StatePlaying
-		return nil
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.saveSettings()
-		return ebiten.Termination
+		g.state = StateMenu
 	}
-	return nil
 }
 
 func (g *Game) updateGameOver() {
-	dt := g.timeScale()
-	g.frame += dt
-	g.updateParticles(dt)
-	// мир живёт без игрока: машины разъезжаются
-	g.updateEnemies(g.effectiveSpeed(), dt)
-
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
 		g.reset(g.startStage)
 		g.state = StatePlaying
@@ -373,139 +364,143 @@ func (g *Game) updateGameOver() {
 	}
 }
 
-func (g *Game) occupiedLanes(bandY float64) map[int]bool {
-	occ := map[int]bool{}
-	for _, e := range g.enemies {
-		if e.Y < bandY {
-			occ[laneOfX(e.X+e.W/2)] = true
-		}
-	}
-	return occ
-}
-
+// spawnEnemy — через фабрику RandomEnemy из car.go, с проверкой,
+// что верхняя часть полосы свободна.
 func (g *Game) spawnEnemy() {
-	const bandY = 300
-	occ := g.occupiedLanes(bandY)
-
-	free := make([]int, 0, laneCount)
-	for lane := 0; lane < laneCount; lane++ {
-		if !occ[lane] {
-			free = append(free, lane)
+	lx := rand.Intn(laneCount)
+	lcx := laneCenterX(lx, carW)
+	for _, e := range g.enemies {
+		if math.Abs(e.X-lcx) < laneWidth && e.Y < -60 {
+			return // полоса сверху занята — пропускаем спавн
 		}
 	}
-	if len(free) <= 2 {
-		return
-	}
-	g.enemies = append(g.enemies, RandomEnemy(free[rand.Intn(len(free))]))
+	g.enemies = append(g.enemies, RandomEnemy(lx))
 }
 
-// ---------- Draw ----------
-
-func (g *Game) Draw(screen *ebiten.Image) {
-	if g.state == StateMenu {
-		g.drawMenu(screen)
-		return
-	}
-	g.drawWorld(screen)
-}
+// ---------- отрисовка ----------
 
 func (g *Game) drawWorld(screen *ebiten.Image) {
-	def := stageDefs[g.stageIdx]
-	night := def.Night
+	def := g.currentDef()
 
 	vector.FillRect(screen, 0, 0, screenWidth, screenHeight, def.Grass, false)
-	vector.FillRect(screen, roadX0, 0, roadW, screenHeight, def.Asphalt, false)
+	vector.FillRect(screen, roadX0, 0, roadX1-roadX0, screenHeight, def.Asphalt, false)
+
+	edge := color.RGBA{R: 235, G: 235, B: 240, A: 255}
+	vector.FillRect(screen, roadX0+2, 0, 3, screenHeight, edge, false)
+	vector.FillRect(screen, roadX1-5, 0, 3, screenHeight, edge, false)
+
+	// разметка полос — едет вниз вместе с миром
+	const dashLen, spacing = 42, 88
+	frac := math.Mod(g.markOffset, spacing)
+	for j := -1; j <= screenHeight/spacing+1; j++ {
+		y := frac + float64(j)*spacing
+		for l := 1; l < laneCount; l++ {
+			x := roadX0 + laneWidth*l - 2
+			vector.FillRect(screen, float32(x), float32(y), 4, dashLen, def.Mark, false)
+		}
+	}
 
 	g.drawScenery(screen, def)
 
-	edge := color.RGBA{R: 230, G: 200, B: 60, A: 255}
-	mark := color.RGBA{R: 235, G: 235, B: 200, A: 255}
-	if night {
-		edge = color.RGBA{R: 140, G: 122, B: 40, A: 255}
-		mark = color.RGBA{R: 170, G: 170, B: 140, A: 255}
+	// ночь: затемнение и лучи фар — до машин
+	dark := def.Night
+	if dark > 0.02 {
+		vector.FillRect(screen, 0, 0, screenWidth, screenHeight,
+			color.RGBA{R: 8, G: 10, B: 30, A: uint8(110 * dark)}, false)
 	}
-	vector.FillRect(screen, roadX0, 0, 4, screenHeight, edge, false)
-	vector.FillRect(screen, roadX1-4, 0, 4, screenHeight, edge, false)
-
-	cycle := 60.0
-	offset := math.Mod(g.markOffset, cycle)
-	for i := 1; i < laneCount; i++ {
-		x := float32(roadX0 + i*laneWidth - 2)
-		for y := -cycle + offset; y < screenHeight; y += cycle {
-			vector.FillRect(screen, x, float32(y), 4, 30, mark, false)
-		}
-	}
-
-	// ночь: затемнение и лучи фар — под машинами, чтобы свет помогал, а не слепил
-	if night {
-		vector.FillRect(screen, 0, 0, screenWidth, screenHeight, color.RGBA{R: 8, G: 10, B: 30, A: 110}, false)
+	if dark > 0.2 {
+		k := (dark - 0.2) / 0.8
 		for _, e := range g.enemies {
-			drawHeadlights(screen, e)
+			drawHeadlights(screen, e, k)
 		}
-		drawHeadlights(screen, g.player)
+		drawHeadlights(screen, g.player, k)
 	}
 
 	for _, e := range g.enemies {
-		drawCar(screen, e, g.sprites[e.Kind])
+		sp := g.sprites[e.Kind]
+		drawCar(screen, e, &sp)
 		drawBlinker(screen, e, e.Blink, int(g.frame))
 		drawBrakeLights(screen, e, e.Braking)
 	}
-	drawCar(screen, g.player, g.playerSkins[g.skinIdx])
+	ps := g.playerSkins[g.skinIdx]
+	drawCar(screen, g.player, &ps)
 	drawBrakeLights(screen, g.player, g.playerBraking)
 
-	// ночь: задние габариты со свечением — поверх машин
-	if night {
+	// ночь: задние габариты поверх машин
+	if dark > 0.2 {
 		for _, e := range g.enemies {
 			drawTailLights(screen, e)
 		}
 		drawTailLights(screen, g.player)
 	}
 
-	g.drawParticles(screen)
-
-	// HUD
-	speedKmh := int(g.effectiveSpeed() * 18)
-	speedClr := color.RGBA{R: 200, G: 200, B: 200, A: 255}
-	if g.boost > 0.01 {
-		speedClr = color.RGBA{R: 120, G: 255, B: 120, A: 255}
-	} else if g.boost < -0.01 {
-		speedClr = color.RGBA{R: 255, G: 120, B: 120, A: 255}
-	}
-	drawText(screen, fmt.Sprintf("Score: %d", g.score), 16, 24, 18, color.RGBA{R: 255, G: 230, B: 120, A: 255})
-	drawText(screen, fmt.Sprintf("Best: %d", g.highScore), 16, 50, 18, color.RGBA{R: 120, G: 220, B: 255, A: 255})
-	drawText(screen, fmt.Sprintf("Speed: %d km/h", speedKmh), 16, 76, 16, speedClr)
-	drawText(screen, fmt.Sprintf("Dist: %d m", int(g.distance)), 16, 100, 14, color.White)
-	drawText(screen, g.stageName(g.stageIdx), screenWidth-170, 24, 16, color.White)
-	if g.muted {
-		drawText(screen, "MUTED (M)", screenWidth-120, 50, 14, color.RGBA{R: 160, G: 160, B: 160, A: 255})
-	}
-
-	// баннер STAGE CLEAR
-	if g.banner > 0 {
-		vector.FillRect(screen, 0, screenHeight/2-80, screenWidth, 116, color.RGBA{R: 0, G: 0, B: 0, A: 210}, false)
-		drawTextCentered(screen, "STAGE CLEAR!", screenHeight/2-62, 34, color.RGBA{R: 255, G: 220, B: 80, A: 255})
-		drawTextCentered(screen, fmt.Sprintf("BONUS +%d", stageClearBonus), screenHeight/2-14, 22, color.White)
-		drawTextCentered(screen, "NEXT: "+g.stageName(g.stageIdx), screenHeight/2+16, 18, color.RGBA{R: 160, G: 220, B: 255, A: 255})
-	}
-
-	if g.state == StatePaused {
-		vector.FillRect(screen, 0, 0, screenWidth, screenHeight, color.RGBA{R: 0, G: 0, B: 0, A: 170}, false)
-		drawTextCentered(screen, "PAUSED", screenHeight/2-40, 34, color.White)
-		drawTextCentered(screen, "P — продолжить", screenHeight/2+10, 18, color.White)
-		drawTextCentered(screen, "ESC — выход", screenHeight/2+40, 18, color.White)
-	}
-
-	if g.state == StateGameOver {
-		vector.FillRect(screen, 0, 0, screenWidth, screenHeight, color.RGBA{R: 0, G: 0, B: 0, A: 170}, false)
-		drawTextCentered(screen, "GAME OVER", screenHeight/2-60, 30, color.RGBA{R: 255, G: 90, B: 90, A: 255})
-		drawTextCentered(screen, fmt.Sprintf("Score: %d   Best: %d", g.score, g.highScore), screenHeight/2, 20, color.White)
-		if g.score >= g.highScore && g.score > 0 {
-			drawTextCentered(screen, "NEW RECORD!", screenHeight/2+30, 20, color.RGBA{R: 255, G: 220, B: 80, A: 255})
-		}
-		drawTextCentered(screen, "R — restart    ESC — menu", screenHeight/2+64, 18, color.White)
+	// искры взрыва
+	for _, p := range g.sparks {
+		c := p.Clr
+		c.A = uint8(clamp(255*p.Life/p.Max, 0, 255))
+		vector.FillCircle(screen, float32(p.X), float32(p.Y), float32(p.Size), c, false)
 	}
 }
 
-func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	return screenWidth, screenHeight
+func (g *Game) drawHUD(screen *ebiten.Image) {
+	def := g.currentDef()
+	eff := g.scrollSpeed * (1 + 0.35*g.boost)
+	if g.playerBraking {
+		eff *= 0.6
+	}
+
+	gold := color.RGBA{R: 255, G: 210, B: 60, A: 255}
+	cyan := color.RGBA{R: 120, G: 220, B: 255, A: 255}
+	grey := color.RGBA{R: 200, G: 200, B: 210, A: 255}
+	green := color.RGBA{R: 120, G: 255, B: 120, A: 255}
+
+	drawText(screen, fmt.Sprintf("Score: %d", g.curScore()), 12, 10, 20, gold)
+	drawText(screen, fmt.Sprintf("Best: %d", g.highScore), 12, 38, 20, cyan)
+	drawText(screen, fmt.Sprintf("Speed: %d km/h", int(eff*0.3)), 12, 66, 18, green)
+	drawText(screen, fmt.Sprintf("Dist: %d m", int(g.distance)), 12, 92, 18, grey)
+	drawTextCentered(screen, def.Name, 14, 18, grey)
+	if g.muted {
+		drawTextCentered(screen, "MUTED (M)", 42, 16, grey)
+	}
+}
+
+func (g *Game) drawBanner(screen *ebiten.Image) {
+	a := g.banner / 2
+	if a > 1 {
+		a = 1
+	}
+	clr := color.RGBA{R: 255, G: 210, B: 60, A: uint8(255 * a)}
+	drawTextCentered(screen, stageDefs[g.stageIdx].Name, 160, 44, clr)
+}
+
+func (g *Game) drawPause(screen *ebiten.Image) {
+	vector.FillRect(screen, 0, 0, screenWidth, screenHeight,
+		color.RGBA{R: 0, G: 0, B: 0, A: 130}, false)
+	drawTextCentered(screen, "PAUSE", screenHeight/2-50, 40,
+		color.RGBA{R: 255, G: 210, B: 60, A: 255})
+	drawTextCentered(screen, "P — продолжить, ESC — в меню", screenHeight/2+16, 18, color.White)
+}
+
+func (g *Game) drawGameOver(screen *ebiten.Image) {
+	vector.FillRect(screen, 0, 0, screenWidth, screenHeight,
+		color.RGBA{R: 60, G: 10, B: 10, A: 150}, false)
+	drawTextCentered(screen, "CRASH!", screenHeight/2-140, 48,
+		color.RGBA{R: 255, G: 80, B: 60, A: 255})
+	drawTextCentered(screen, fmt.Sprintf("Score: %d", g.curScore()), screenHeight/2-60, 26,
+		color.RGBA{R: 255, G: 210, B: 60, A: 255})
+	drawTextCentered(screen, fmt.Sprintf("Best: %d", g.highScore), screenHeight/2-16, 22,
+		color.RGBA{R: 120, G: 220, B: 255, A: 255})
+	drawTextCentered(screen, "R — заново, ESC — меню", screenHeight/2+40, 18, color.White)
+}
+
+// ---------- утилиты ----------
+
+func clamp(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }

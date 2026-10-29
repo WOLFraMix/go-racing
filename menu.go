@@ -24,6 +24,7 @@ var skinMeta = []skinDef{
 	{"player_orange.png", color.RGBA{R: 240, G: 120, B: 35, A: 255}, "SUNSET"},
 }
 
+// drawTextCenteredX — центрирование по произвольной точке, с тенью.
 func drawTextCenteredX(dst *ebiten.Image, s string, cx int, y int, size float64, clr color.Color) {
 	sh := &text.DrawOptions{}
 	sh.GeoM.Translate(float64(cx+2), float64(y+2))
@@ -78,12 +79,12 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	drawTextCentered(screen, "GO RACING", 60, 44, color.RGBA{R: 255, G: 210, B: 60, A: 255})
 	drawTextCentered(screen, "MINI", 112, 30, color.RGBA{R: 255, G: 210, B: 60, A: 255})
 
-	// ---------- превью машины (×1.4) ----------
+	// ---------- превью машины ----------
 	s := g.playerSkins[g.skinIdx]
 	const scale = 1.4
 	pw, ph := 106.0*scale, 152.0*scale
 	px := float64(screenWidth)/2 - pw/2
-	py := 160.0
+	py := 210.0
 	if s.Img != nil {
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Scale(scale, scale)
@@ -104,7 +105,7 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	drawText(screen, "▶", screenWidth-78, nameY, 20, white)
 
 	// ---------- выбор стартовой локации ----------
-	const cardW, cardH, gap = 95, 66, 10
+	const cardW, cardH, gap = 78, 66, 8
 	totalW := len(stageDefs)*cardW + (len(stageDefs)-1)*gap
 	startX := (screenWidth - totalW) / 2
 	cardsY := nameY + 40
@@ -119,14 +120,16 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 		vector.FillRect(screen, float32(x), float32(cardsY), cardW, cardH, border, false)
 		vector.FillRect(screen, float32(x+3), float32(cardsY+3), cardW-6, cardH-6, def.Grass, false)
 		vector.FillRect(screen, float32(x+12), float32(cardsY+3), cardW-24, cardH-6, def.Asphalt, false)
-		if def.Night {
+		if def.Night > 0.5 {
 			vector.FillRect(screen, float32(x+12), float32(cardsY+3), cardW-24, cardH-6,
 				color.RGBA{R: 6, G: 8, B: 24, A: 90}, false)
+		} else if def.Night > 0.2 {
+			vector.FillRect(screen, float32(x+12), float32(cardsY+3), cardW-24, cardH-6,
+				color.RGBA{R: 6, G: 8, B: 24, A: 45}, false) // лёгкий полумрак для DUSK/DAWN
 		} else if def.Name == "HIGHWAY" {
 			vector.FillRect(screen, float32(x+12), float32(cardsY+3), 4, cardH-6,
 				color.RGBA{R: 165, G: 168, B: 175, A: 255}, false)
 		}
-		// название ПОД своей карточкой, по центру карточки (а не экрана)
 		clr := color.RGBA{R: 200, G: 200, B: 210, A: 255}
 		if sel {
 			clr = gold
@@ -134,7 +137,6 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 		drawTextCenteredX(screen, def.Name, x+cardW/2, cardsY+cardH+8, 13, clr)
 	}
 
-	// стрелки выбора локации — слева от ряда карточек, вертикальной парой
 	drawText(screen, "▲", 24, cardsY+cardH/2-26, 18, white)
 	drawText(screen, "▼", 24, cardsY+cardH/2+4, 18, white)
 	drawTextCentered(screen, "↑ ↓ — стартовая локация", cardsY+cardH+34, 15, white)

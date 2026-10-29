@@ -122,7 +122,7 @@ func (a *AudioSys) PlayCrash(vol float64, muted bool) {
 	if err != nil {
 		return
 	}
-	p.SetVolume(vol * 0.2)
+	p.SetVolume(vol * 0.15)
 	p.Play()
 }
 

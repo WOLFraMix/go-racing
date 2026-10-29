@@ -145,17 +145,18 @@ func init() {
 	beamImg = ebiten.NewImageFromImage(src)
 }
 
-// drawHeadlights — два луча от левой и правой фар; рисуется ДО машин.
-func drawHeadlights(dst *ebiten.Image, c Car) {
+// drawHeadlights — два луча от левой и правой фар; k — яркость от темноты.
+func drawHeadlights(dst *ebiten.Image, c Car, k float64) {
 	if beamImg == nil {
 		return
 	}
 	const length = 175.0
-	w := c.W * 1.7 // ширина каждого конуса: сливаются в один поток, но видно две лампы
+	w := c.W * 1.7
 	for _, lx := range []float64{c.X + c.W*0.18, c.X + c.W*0.82} {
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Scale(w/160, length/180)
 		op.GeoM.Translate(lx-w/2, c.Y-length)
+		op.ColorScale.Scale(float32(k), float32(k), float32(k), float32(k)) // плавный набор яркости
 		dst.DrawImage(beamImg, op)
 	}
 }
