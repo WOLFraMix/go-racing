@@ -61,13 +61,13 @@ func randomSpeed(base float64) float64 {
 }
 
 // canChangeInto — манёвр в полосу target допустим, только если даже
-// во время перестроения (машина числится в ОБЕИХ полосах) в каждом
-// окне дороги остаются свободными минимум две полосы.
+// во время перестроения (машина числится в ОБЕИХ полосах) маршрут
+// проезда сохраняется, а зона комфорта вокруг игрока не сужается.
 func (g *Game) canChangeInto(e Car, target int) bool {
 	if target < 0 || target >= laneCount {
 		return false
 	}
-	return g.passOK(
+	return g.spawnSafe(
 		blocker{lane: e.Lane, y0: e.Y, y1: e.Y + e.H},
 		blocker{lane: target, y0: e.Y, y1: e.Y + e.H},
 	)

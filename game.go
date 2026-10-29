@@ -7,7 +7,6 @@ import (
 	"image/color"
 	_ "image/png"
 	"math"
-	"math/bits"
 	"math/rand"
 	"os"
 
@@ -29,24 +28,17 @@ const (
 
 	playerYBase = screenHeight - 210
 
-	// гарантия проезда: на каждой линии Y минимум одна полоса полностью
-	// свободна от кузовов — горизонтальная стена невозможна
-	minPassLanes = 1
-
-	// комфорт возле игрока: на линиях в его зоне свободны минимум две
-	// полосы — запас на манёвр и отступление
-	comfortLanes = 2
-	comfortZone  = 160.0
-
-	// шаг выборки линий по Y: достаточно мелкий, чтобы стена шириной
-	// в кузов не проскочила между проверками
-	passStep = 40.0
+	// проезжаемость: маршрут от игрока до верха дороги существует всегда.
+	// Проверяется BFS-ом каждый кадр; спавн и перестроения не имеют
+	// права маршрут ломать.
+	passBand    = 40.0   // высота клетки сетки проезда
+	passTop     = -420.0 // верх проверки: выше экрана, с запасом на stagger
+	comfortZone = 160.0  // зона комфорта вокруг игрока
 
 	// зазор между верхом новой машины и верхней машиной полосы
 	spawnPlatoonGap = 220.0
 
-	// случайный вертикальный сдвиг спавна: плетни не стартуют
-	// синхронно, выровненные ряды не образуются
+	// случайный вертикальный сдвиг спавна: плетни не стартуют синхронно
 	spawnStagger = 220.0
 )
 
@@ -113,6 +105,10 @@ type Game struct {
 
 	// сгенерированные варианты скинов врагов: перекраска + детали
 	enemyVariants map[CarKind][]Sprite
+
+	// фронт затора для ремонта: заполняется passPath при провале
+	wallBand  int
+	wallLanes uint8
 }
 
 // ---------- загрузка спрайтов ----------
@@ -247,18 +243,191 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return screenWidth, screenHeight
 }
 
-// ---------- занятость полос: основа инварианта проезда ----------
+// ---------- гарантия проезда: BFS по сетке ----------
 
-// topmostYInLane — Y самой верхней машины в полосе (1e9, если полоса пуста).
-func (g *Game) topmostYInLane(l int) float64 {
-	best := 1e9
+// blocker — машина как препятствие: полоса по центру кузова,
+// вертикальный отрезок [y0, y1].
+type blocker struct {
+	lane   int
+	y0, y1 float64
+}
+
+// collectBlockers — все машины на экране + игрок.
+func (g *Game) collectBlockers() []blocker {
+	bs := make([]blocker, 0, len(g.enemies)+1)
 	for i := range g.enemies {
 		e := &g.enemies[i]
-		if laneOfX(e.X+e.W/2) == l && e.Y < best {
-			best = e.Y
+		bs = append(bs, blocker{laneOfX(e.X + e.W/2), e.Y, e.Y + e.H})
+	}
+	p := &g.player
+	bs = append(bs, blocker{laneOfX(p.X + p.W/2), p.Y, p.Y + p.H})
+	return bs
+}
+
+// passPath — есть ли маршрут от машины игрока до верха дороги по
+// свободным клеткам сетки (полоса × полоса Y). Ход: на клетку выше в
+// той же полосе или на соседней. Медленный тормозящий манёвр игрока
+// делает такой шаг всегда реальным, так что связность клеток — честная
+// модель проезжаемости. При провале запоминает фронт затора для ремонта.
+func (g *Game) passPath(extra ...blocker) bool {
+	bs := g.collectBlockers()
+	bs = append(bs, extra...)
+
+	nB := int((g.player.Y+g.player.H+40.0-passTop)/passBand) + 1
+	occ := make([]uint8, nB) // бит l — полоса l занята в полосе-строке i
+	for _, b := range bs {
+		i0 := int((b.y0 - passTop) / passBand)
+		i1 := int((b.y1 - passTop) / passBand)
+		if i0 < 0 {
+			i0 = 0
+		}
+		if i1 > nB-1 {
+			i1 = nB - 1
+		}
+		for i := i0; i <= i1; i++ {
+			occ[i] |= 1 << uint(b.lane)
 		}
 	}
-	return best
+
+	pl := laneOfX(g.player.X + g.player.W/2)
+	pi := int((g.player.Y + g.player.H/2 - passTop) / passBand)
+	if pi > nB-1 {
+		pi = nB - 1
+	}
+
+	reached := make([]bool, nB*laneCount)
+	bandMask := make([]uint8, nB)
+	start := pi*laneCount + pl
+	reached[start] = true
+	bandMask[pi] |= 1 << uint(pl)
+	frontier := []int{start}
+	minI := pi
+
+	for len(frontier) > 0 {
+		var next []int
+		for _, c := range frontier {
+			i, l := c/laneCount, c%laneCount
+			ni := i - 1
+			if ni < 0 {
+				return true // дошли выше экрана — маршрут есть
+			}
+			for nl := l - 1; nl <= l+1; nl++ {
+				if nl < 0 || nl >= laneCount {
+					continue
+				}
+				if occ[ni]&(1<<uint(nl)) != 0 {
+					continue
+				}
+				nc := ni*laneCount + nl
+				if !reached[nc] {
+					reached[nc] = true
+					bandMask[ni] |= 1 << uint(nl)
+					next = append(next, nc)
+					if ni < minI {
+						minI = ni
+					}
+				}
+			}
+		}
+		frontier = next
+	}
+
+	g.wallBand = minI
+	g.wallLanes = bandMask[minI]
+	return false
+}
+
+// ensurePassable — ежекадровая страховка: если маршрут от игрока до
+// верха пропал (плетни сползли друг в друга), вскрываем затор, не
+// дожидаясь, пока он доедет до игрока.
+func (g *Game) ensurePassable() {
+	for i := 0; i < 3; i++ {
+		if g.passPath() {
+			return
+		}
+		if !g.repairWall() {
+			return
+		}
+	}
+}
+
+// repairWall — вскрывает затор на фронте wallBand: выбирает машину-
+// преграду возле фронта и либо принудительно перестраивает её (если
+// соседняя полоса физически свободна), либо даёт ускорение, чтобы она
+// уехала с линии и открыла щель. Возвращает true, если мера применена.
+func (g *Game) repairWall() bool {
+	bandY0 := passTop + float64(g.wallBand-1)*passBand
+	bandY1 := bandY0 + 2*passBand
+	lm := g.wallLanes
+	lm = (lm | lm<<1 | lm>>1) & 0x3F // фронт + соседние полосы
+
+	var cands []*Car
+	for i := range g.enemies {
+		e := &g.enemies[i]
+		if e.Y+e.H < bandY0 || e.Y > bandY1 {
+			continue
+		}
+		if lm&(1<<uint(laneOfX(e.X+e.W/2))) != 0 {
+			cands = append(cands, e)
+		}
+	}
+	if len(cands) == 0 {
+		return false
+	}
+	e := cands[rand.Intn(len(cands))]
+
+	// 1) форс-перестроение в физически свободную соседнюю полосу
+	if e.TargetLane == e.Lane {
+		for _, nl := range [2]int{e.Lane - 1, e.Lane + 1} {
+			if nl >= 0 && nl < laneCount && g.laneFreeFor(*e, -1, nl) {
+				e.TargetLane = nl
+				e.Blink = nl - e.Lane
+				e.Cooldown = changeCooldown
+				return true
+			}
+		}
+	}
+	// 2) ускорение: машина уезжает вперёд, щель открывается
+	fast := 2.4 + rand.Float64()*0.5
+	if e.BaseOwn < fast {
+		e.BaseOwn = fast
+	}
+	if e.OwnSpeed < e.BaseOwn {
+		e.OwnSpeed = e.BaseOwn
+	}
+	return true
+}
+
+// spawnSafe — спавн или перестроение допустимы, только если маршрут
+// проезда сохраняется, а в зоне комфорта вокруг игрока на каждой линии
+// остаются свободными минимум две полосы — запас на манёвр.
+func (g *Game) spawnSafe(extra ...blocker) bool {
+	if !g.passPath(extra...) {
+		return false
+	}
+	bs := g.collectBlockers()
+	bs = append(bs, extra...)
+	py0 := g.player.Y - comfortZone
+	py1 := g.player.Y + g.player.H + comfortZone
+	for y := py0; y <= py1; y += passBand {
+		free := 0
+		for l := 0; l < laneCount; l++ {
+			blocked := false
+			for _, b := range bs {
+				if b.lane == l && b.y0 < y && b.y1 > y {
+					blocked = true
+					break
+				}
+			}
+			if !blocked {
+				free++
+			}
+		}
+		if free < 2 {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------- игровая логика ----------
@@ -348,12 +517,15 @@ func (g *Game) updatePlaying() {
 		if g.spawnEnemy() {
 			g.spawnTimer = (120 + rand.Float64()*120) / (math.Max(eff, 1) * diffMult[g.difficulty])
 		} else {
-			g.spawnTimer = 0.05
+			g.spawnTimer = 0.12 // не вышло — повторяем чуть позже, без залпов
 		}
 	}
 
 	// ИИ врагов: eff/60 — px за кадр (единицы OwnSpeed), 60*dt — dt в кадрах
 	g.updateEnemies(eff/60.0, 60.0*dt)
+
+	// страховка проезда каждый кадр: вскрываем заторы, если путь пропал
+	g.ensurePassable()
 
 	// объезд машин, столкновения, вылет за экран
 	for i := len(g.enemies) - 1; i >= 0; i-- {
@@ -440,73 +612,22 @@ func (g *Game) updateGameOver() {
 	}
 }
 
-// blocker — машина как препятствие для полосы: центр машины определяет
-// полосу, y0..y1 — занимаемый по вертикали отрезок.
-type blocker struct {
-	lane   int
-	y0, y1 float64
-}
-
-// collectBlockers — все машины на экране + игрок как препятствия.
-func (g *Game) collectBlockers() []blocker {
-	bs := make([]blocker, 0, len(g.enemies)+1)
+// topmostYInLane — Y самой верхней машины в полосе (1e9, если пусто).
+func (g *Game) topmostYInLane(l int) float64 {
+	best := 1e9
 	for i := range g.enemies {
 		e := &g.enemies[i]
-		bs = append(bs, blocker{laneOfX(e.X + e.W/2), e.Y, e.Y + e.H})
+		if laneOfX(e.X+e.W/2) == l && e.Y < best {
+			best = e.Y
+		}
 	}
-	p := &g.player
-	bs = append(bs, blocker{laneOfX(p.X + p.W/2), p.Y, p.Y + p.H})
-	return bs
+	return best
 }
 
-// passOK — построчная проверка проезда. На каждой линии Y (с шагом
-// passStep) минимум need полос полностью свободны от кузовов, а
-// множества свободных полос соседних линий пересекаются — иначе между
-// ними нет непрерывного пути. В зоне комфорта вокруг игрока need = 2.
-func (g *Game) passOK(extra ...blocker) bool {
-	bs := g.collectBlockers()
-	bs = append(bs, extra...)
-	py0 := g.player.Y - comfortZone
-	py1 := g.player.Y + g.player.H + comfortZone
-
-	prevFree := uint8(0)
-	prevValid := false
-	for y := -300.0; y <= screenHeight+300.0; y += passStep {
-		need := minPassLanes
-		if y > py0 && y < py1 {
-			need = comfortLanes
-		}
-		var free uint8
-		for l := 0; l < laneCount; l++ {
-			blocked := false
-			for _, b := range bs {
-				if b.lane == l && b.y0 < y && b.y1 > y {
-					blocked = true
-					break
-				}
-			}
-			if !blocked {
-				free |= 1 << l
-			}
-		}
-		if bits.OnesCount8(free) < need {
-			return false
-		}
-		// свободные полосы соседних линий обязаны пересекаться:
-		// иначе игрок должен «перепрыгнуть» через занятую линию
-		if prevValid && free&prevFree == 0 {
-			return false
-		}
-		prevFree = free
-		prevValid = true
-	}
-	return true
-}
-
-// spawnEnemy — спавн в ЛЮБУЮ полосу, где есть место за плетнем
-// (spawnPlatoonGap от верхней машины), но только если это не создаёт
-// стены: после добавления в каждом окне дороги остаются свободными
-// минимум две полосы. Возвращает true, если машина заспавнена.
+// spawnEnemy — спавн в любую полосу, где есть зазор за плетнем,
+// но только если маршрут проезда и зона комфорта сохраняются
+// (spawnSafe). Полосы выбираются в случайном порядке — «вечных
+// свободных полос» не существует. Возвращает true, если заспавнено.
 func (g *Game) spawnEnemy() bool {
 	var cand []int
 	for l := 0; l < laneCount; l++ {
@@ -514,14 +635,12 @@ func (g *Game) spawnEnemy() bool {
 			cand = append(cand, l)
 		}
 	}
-	// случайный порядок кандидатов — полосы используются равномерно
 	rand.Shuffle(len(cand), func(i, j int) { cand[i], cand[j] = cand[j], cand[i] })
 
 	for _, l := range cand {
-		lx := cand[rand.Intn(len(cand))]
-		e := RandomEnemy(lx)
+		e := RandomEnemy(l)
 		e.Y -= rand.Float64() * spawnStagger // плетни стартуют вразнобой
-		if g.passOK(blocker{lane: l, y0: e.Y, y1: e.Y + e.H}) {
+		if g.spawnSafe(blocker{lane: l, y0: e.Y, y1: e.Y + e.H}) {
 			if len(g.enemyVariants[e.Kind]) > 0 {
 				e.Skin = rand.Intn(len(g.enemyVariants[e.Kind]))
 			}
