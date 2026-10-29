@@ -118,10 +118,10 @@ func init() {
 	for y := 0; y < H; y++ {
 		t := float64(H-1-y) / float64(H-1) // 0 у машины, 1 на дальнем конце
 		fall := (1 - t) * (1 - t)          // свет тает к дальнему концу
-		half := 0.20 + 0.44*t              // было 0.16 + 0.40*t — чуть шире
+		half := 0.28 + 0.52*t
 		for x := 0; x < W; x++ {
 			dx := math.Abs(float64(x)+0.5-cx) / (float64(W) / 2)
-			f := (half - dx) / 0.18 // мягкий край вместо резкой границы
+			f := (half - dx) / 0.30 // мягкий край вместо резкой границы
 			if f > 1 {
 				f = 1
 			}
@@ -133,7 +133,7 @@ func init() {
 				continue
 			}
 			// премультиплированный цвет: RGB = цвет × альфа (тёплый белый)
-			a := 118 * intensity
+			a := 140 * intensity
 			src.SetRGBA(x, y, color.RGBA{
 				R: uint8(clamp255(a)),
 				G: uint8(clamp255(a * 0.96)),
@@ -150,9 +150,9 @@ func drawHeadlights(dst *ebiten.Image, c Car) {
 	if beamImg == nil {
 		return
 	}
-	const length = 170.0
-	w := c.W * 1.35 // ширина каждого конуса: сливаются в один поток, но видно две лампы
-	for _, lx := range []float64{c.X + c.W*0.22, c.X + c.W*0.78} {
+	const length = 175.0
+	w := c.W * 1.7 // ширина каждого конуса: сливаются в один поток, но видно две лампы
+	for _, lx := range []float64{c.X + c.W*0.18, c.X + c.W*0.82} {
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Scale(w/160, length/180)
 		op.GeoM.Translate(lx-w/2, c.Y-length)
@@ -167,16 +167,17 @@ func drawTailLights(dst *ebiten.Image, c Car) {
 	y := c.Y + c.H - lampH - 2
 	lamps := []float64{c.X + 3, c.X + c.W - lampW - 3}
 
-	// мягкое свечение позади каждого фонаря
+	// очень сдержанное свечение позади каждого фонаря
 	for _, lx := range lamps {
 		cxp := lx + lampW/2
-		vector.FillCircle(dst, float32(cxp), float32(y+lampH+1), 11,
-			color.RGBA{R: 255, G: 60, B: 40, A: 18}, false)
-		vector.FillCircle(dst, float32(cxp), float32(y+lampH+1), 5,
-			color.RGBA{R: 255, G: 70, B: 50, A: 32}, false)
+		vector.FillCircle(dst, float32(cxp), float32(y+lampH+1), 9,
+			color.RGBA{R: 200, G: 40, B: 30, A: 10}, false)
+		vector.FillCircle(dst, float32(cxp), float32(y+lampH+1), 4,
+			color.RGBA{R: 220, G: 50, B: 35, A: 18}, false)
 	}
+
 	// сами фонари — насыщенные тёмно-красные плашки
-	lamp := color.RGBA{R: 190, G: 30, B: 30, A: 235}
+	lamp := color.RGBA{R: 150, G: 26, B: 26, A: 210}
 	for _, lx := range lamps {
 		vector.FillRect(dst, float32(lx), float32(y), float32(lampW), float32(lampH), lamp, false)
 	}
