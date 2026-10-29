@@ -284,7 +284,7 @@ func (g *Game) updatePlaying() {
 	g.spawnTimer -= dt
 	if g.spawnTimer <= 0 {
 		g.spawnEnemy()
-		g.spawnTimer = (260 + rand.Float64()*260) / (math.Max(eff, 1) * diffMult[g.difficulty])
+		g.spawnTimer = (190 + rand.Float64()*190) / (math.Max(eff, 1) * diffMult[g.difficulty])
 	}
 
 	// ИИ врагов: eff/60 — px за кадр (единицы OwnSpeed), 60*dt — dt в кадрах
