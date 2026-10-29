@@ -49,7 +49,7 @@ const (
 
 	// запрет «строк»: в соседних полосах от точки спавна не должно быть
 	// машин ближе этого расстояния по вертикали
-	rowClear = 120.0
+	rowClear = 100.0
 )
 
 // множитель плотности спавна по сложности
@@ -498,14 +498,17 @@ func (g *Game) updatePlaying() {
 		g.boost += (0 - g.boost) * math.Min(1, 4*dt)
 	}
 
-	// «клевок» машины: тормоз — вниз, газ — вверх
+	// «клевок» машины: тормоз — назад, газ — вперёд.
+	// Сдвиг входит в логическую позицию g.player.Y: спрайт и хитбокс
+	// всегда в одном месте, расхождение невозможно по построению.
 	targetYOff := 0.0
 	if g.playerBraking {
-		targetYOff = 20.0
+		targetYOff = 24.0
 	} else if g.boost > 0.5 {
-		targetYOff = -12.0
+		targetYOff = -14.0
 	}
-	g.yOff += (targetYOff - g.yOff) * math.Min(1, 8*dt)
+	g.yOff += (targetYOff - g.yOff) * math.Min(1, 15*dt)
+	g.player.Y = float64(playerYBase) + g.yOff
 
 	// смена этапа
 	def := stageDefs[g.stageIdx]
@@ -692,10 +695,8 @@ func (g *Game) spawnEnemy() bool {
 func (g *Game) drawWorld(screen *ebiten.Image) {
 	def := g.currentDef()
 
-	// ВАЖНО: игрок рисуется строго по логической позиции (g.player.Y),
-	// без всяких визуальных сдвигов вроде g.yOff. Хитбокс считается по
-	// g.player — если спрайт рисовать со сдвигом, картинка и коллизии
-	// расходятся, и при торможении краш «появляется из ниоткуда».
+	// Кивок (yOff) входит в логическую позицию g.player.Y — спрайт и
+	// хитбокс всегда совпадают, отдельного визуального сдвига нет.
 	playerDraw := g.player
 
 	vector.FillRect(screen, 0, 0, screenWidth, screenHeight, def.Grass, false)

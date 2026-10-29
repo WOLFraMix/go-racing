@@ -17,7 +17,7 @@ const (
 	safeGap         = 70
 	changeCooldown  = 150
 
-	randomLaneChance = 0.0001
+	randomLaneChance = 0.00005
 )
 
 const (
@@ -308,7 +308,7 @@ func (g *Game) updateEnemies(eff, dt float64) {
 			} else if gap < desired {
 				// манёвр — только при реальном сближении с лидером,
 				// а не при любом подходе к желаемой дистанции
-				if e.Cooldown > 0 || dc <= 0.05 || !g.tryLaneChange(e, i) {
+				if e.Cooldown > 0 || dc <= 0.15 || !g.tryLaneChange(e, i) {
 					e.Braking = true
 					// не быстрее лидера, пока дистанция меньше желаемой
 					if e.OwnSpeed > leadSpeed {
