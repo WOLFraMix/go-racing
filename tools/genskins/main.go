@@ -23,9 +23,19 @@ type kindDef struct {
 	dir          string
 	base         string
 	repaintLight bool
-	fixBumpers   bool // седан: всё тёмно-красное красим, огни сохраняем
+	fixBumpers   bool // седан: ярко-красный бампер и декор красим, угловые огни сохраняем
 	skins        []skinDef
 }
+
+// Зоны света седана — в долях размеров спрайта, по оригиналу и по скрину из
+// игры (лучи фар идут от передних углов, стопы — у нижних углов).
+// Если на готовых скинах огни сядут чуть не туда — крутятся только эти числа:
+// sedanLightZone ниже — огни крупнее; sedanCornerKeep больше — огни шире.
+const (
+	sedanHeadZone   = 0.08 // выше этой доли высоты сидят кремовые фары
+	sedanLightZone  = 0.90 // ниже — зона задних огней и бампера
+	sedanCornerKeep = 0.20 // доля ширины с каждого края, остающаяся огнями
+)
 
 var kinds = []kindDef{
 	{
@@ -232,17 +242,23 @@ func repaint(src image.Image, target color.RGBA, repaintLight, fixBumpers bool) 
 			protected := false
 
 			if fixBumpers {
-				// фары: кремовые в верхней зоне — не красим никогда
-				if float64(y) < float64(h)*0.08 && hh >= 15 && hh <= 80 && s < 0.5 && v > 0.85 {
+				// фары: кремовые точки в передних углах — не красим никогда
+				if float64(y) < sedanHeadZone*float64(h) && hh >= 15 && hh <= 80 && s < 0.5 && v > 0.85 {
 					protected = true
 				}
-				// задние огни: ярко-красная полоса у нижнего края.
-				// Тёмно-красный кузов (v~0.4) красится, яркие огни (v>0.6) — нет
-				if float64(y) > float64(h)*0.89 && (hh < 25 || hh > 335) && v > 0.6 {
-					protected = true
+				// ярко-красное: у нижней кромки остаются только угловые
+				// сегменты (огни), полоса бампера и весь декор — под кузов
+				if isBrightRed(c) {
+					inCorner := float64(x) < float64(w)*sedanCornerKeep ||
+						float64(x) >= float64(w)*(1-sedanCornerKeep)
+					if float64(y) >= sedanLightZone*float64(h) && inCorner {
+						protected = true
+					} else {
+						paint = true
+					}
 				}
 			} else {
-				// остальные типы: прежние правила, они работают
+				// прежние правила для остальных типов — они работают
 				if float64(y) < float64(h)*0.16 && hh >= 15 && hh <= 80 && s < 0.5 && v > 0.85 {
 					protected = true
 				}
@@ -266,7 +282,7 @@ func repaint(src image.Image, target color.RGBA, repaintLight, fixBumpers bool) 
 			if paint && tLum > 0.55 && v < 0.35 && s > 0.3 {
 				paint = false
 			}
-			// серая фурнитура (бампер, хром) на не-светлых кузовах не красится
+			// серая фурнитура и номер — не красим
 			if paint && !repaintLight && s < 0.15 && v > 0.4 {
 				paint = false
 			}
@@ -274,6 +290,10 @@ func repaint(src image.Image, target color.RGBA, repaintLight, fixBumpers bool) 
 				continue
 			}
 			ratio := lum(r, g, bl) / bodyLum
+			// яркие акценты не «выбеливаем» на светлых кузовах
+			if fixBumpers && ratio > 1.25 {
+				ratio = 1.25
+			}
 			dst.SetRGBA(x, y, color.RGBA{
 				R: clamp255(float64(target.R) * ratio),
 				G: clamp255(float64(target.G) * ratio),
@@ -356,4 +376,12 @@ func rgbToHSV(r, g, b float64) (h, s, v float64) {
 		h += 360
 	}
 	return h, s, v
+}
+
+func isBrightRed(c color.RGBA) bool {
+	if c.A == 0 {
+		return false
+	}
+	hh, s, v := rgbToHSV(float64(c.R)/255, float64(c.G)/255, float64(c.B)/255)
+	return (hh < 25 || hh > 335) && s > 0.4 && v > 0.55
 }
