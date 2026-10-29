@@ -163,7 +163,7 @@ func (g *Game) reset(startStage int) {
 }
 
 func (g *Game) curScore() int {
-	return int(g.distance/10) + g.bonus
+	return g.bonus
 }
 
 // ---------- Update: диспетчер состояний ----------
@@ -290,15 +290,18 @@ func (g *Game) updatePlaying() {
 	// ИИ врагов: eff/60 — px за кадр (единицы OwnSpeed), 60*dt — dt в кадрах
 	g.updateEnemies(eff/60.0, 60.0*dt)
 
-	// ближний обгон, столкновения, вылет за экран
+	// объезд машин, столкновения, вылет за экран
 	for i := len(g.enemies) - 1; i >= 0; i-- {
 		e := &g.enemies[i]
 
+		// машина проехала мимо игрока — очки за объезд с множителем
+		// сложности; вплотную — двойная награда
 		if !e.NearMiss && e.Y+e.H > g.player.Y && e.Y < g.player.Y+g.player.H {
 			e.NearMiss = true
+			g.bonus += e.Points * (g.difficulty + 1)
 			dx := math.Abs((e.X + e.W/2) - (g.player.X + g.player.W/2))
 			if dx < (e.W+g.player.W)/2+10 {
-				g.bonus += e.Points
+				g.bonus += e.Points * (g.difficulty + 1)
 			}
 		}
 
