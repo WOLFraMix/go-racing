@@ -75,9 +75,8 @@ func (g *Game) canChangeInto(e Car, target int) bool {
 }
 
 func (g *Game) tryLaneChange(e *Car, selfIdx int) bool {
-	// глобальный лимит: одновременно по всей дороге максимум один
-	// манёвр — иначе трафик превращается в хаос
-	if g.changePause > 0 {
+	// глобальный лимит: пока кто-то в манёвре — новые не начинаются
+	if g.changePause > 0 || g.changeBusy() {
 		return false
 	}
 	dir := 0
@@ -250,20 +249,24 @@ func (g *Game) updateEnemies(eff, dt float64) {
 		e := &g.enemies[i]
 
 		if e.TargetLane != e.Lane {
-			// боковое перестроение: двигаем X, скорость не трогаем
-			tx := laneCenterX(e.TargetLane, e.W)
-			dx := tx - e.X
-			step := laneChangeSpeed * dt
-			if math.Abs(dx) <= step {
-				e.X = tx
-				e.Lane = e.TargetLane
-				e.BlinkTimer = 24
-				e.Cooldown = changeCooldown
-			} else if dx > 0 {
-				e.X += step
-			} else {
-				e.X -= step
+			// двигаемся вбок ТОЛЬКО когда целевая полоса свободна;
+			// занята — замри на месте, не доворачивай в чужой кузов
+			if g.laneFreeFor(*e, i, e.TargetLane) {
+				tx := laneCenterX(e.TargetLane, e.W)
+				dx := tx - e.X
+				step := laneChangeSpeed * dt
+				if math.Abs(dx) <= step {
+					e.X = tx
+					e.Lane = e.TargetLane
+					e.BlinkTimer = 24
+					e.Cooldown = changeCooldown
+				} else if dx > 0 {
+					e.X += step
+				} else {
+					e.X -= step
+				}
 			}
+			// замерший посреди манёвра: X не трогаем, ждём освобождения
 		} else if e.BlinkTimer > 0 {
 			e.BlinkTimer -= dt
 			if e.BlinkTimer <= 0 {

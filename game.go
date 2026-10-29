@@ -41,16 +41,25 @@ const (
 	// сколько машин максимум вскрывается за один кадр страховки
 	repairSteps = 8
 
-	// зазор между верхом новой машины и верхней машиной полосы
-	spawnPlatoonGap = 220.0
-
 	// случайный вертикальный сдвиг спавна: плетни не стартуют синхронно
 	spawnStagger = 220.0
-
-	// запрет «строк»: в соседних полосах от точки спавна не должно быть
-	// машин ближе этого расстояния по вертикали
-	rowClear = 100.0
 )
+
+// spawnTuning — параметры спавна, зависящие от сложности.
+// Плотность задаётся расстоянием между машинами (px дороги),
+// а не секундами: она не зависит от скорости скролла.
+type spawnTuning struct {
+	platoonGap float64 // минимальный зазор до верхней машины полосы
+	rowClear   float64 // запрет «строк» рядом с точкой спавна
+	interval   float64 // базовое расстояние дороги между спавнами
+	span       float64 // случайная надбавка к нему
+}
+
+var diffSpawn = [3]spawnTuning{
+	{platoonGap: 230, rowClear: 110, interval: 200, span: 120}, // EASY: машина каждые 200–320 px
+	{platoonGap: 175, rowClear: 95, interval: 120, span: 80},   // MEDIUM: каждые 120–200 px
+	{platoonGap: 135, rowClear: 80, interval: 70, span: 50},    // HARD: каждые 70–120 px
+}
 
 // множитель плотности спавна по сложности
 var diffMult = [...]float64{1.0, 1.5, 2.0}
@@ -273,10 +282,15 @@ type blocker struct {
 
 // collectBlockers — все машины на экране + игрок.
 func (g *Game) collectBlockers() []blocker {
-	bs := make([]blocker, 0, len(g.enemies)+1)
+	bs := make([]blocker, 0, len(g.enemies)+2)
 	for i := range g.enemies {
 		e := &g.enemies[i]
-		bs = append(bs, blocker{laneOfX(e.X + e.W/2), e.Y, e.Y + e.H})
+		l := laneOfX(e.X + e.W/2)
+		bs = append(bs, blocker{lane: l, y0: e.Y, y1: e.Y + e.H})
+		// маневрирующая машина физически занимает и целевую полосу
+		if e.TargetLane != l && e.TargetLane >= 0 && e.TargetLane < laneCount {
+			bs = append(bs, blocker{lane: e.TargetLane, y0: e.Y, y1: e.Y + e.H})
+		}
 	}
 	p := &g.player
 	bs = append(bs, blocker{laneOfX(p.X + p.W/2), p.Y, p.Y + p.H})
@@ -405,6 +419,17 @@ func (g *Game) repairWall() bool {
 	return true
 }
 
+// changeBusy — верно, пока хоть одна машина в потоке маневрирует.
+// Пока кто-то перестраивается, новые манёвры не начинаются.
+func (g *Game) changeBusy() bool {
+	for i := range g.enemies {
+		if e := &g.enemies[i]; e.TargetLane != e.Lane {
+			return true
+		}
+	}
+	return false
+}
+
 // spawnSafe — спавн или перестроение допустимы, только если маршрут
 // проезда сохраняется, а в зоне комфорта вокруг игрока на каждой линии
 // остаются свободными минимум две полосы — запас на манёвр.
@@ -442,6 +467,7 @@ func (g *Game) spawnSafe(extra ...blocker) bool {
 // Ряд из машин на одной высоте не образуется даже при плотном спавне.
 func (g *Game) antiRow(e Car) bool {
 	l := laneOfX(e.X + e.W/2)
+	rc := diffSpawn[g.difficulty].rowClear
 	for i := range g.enemies {
 		o := &g.enemies[i]
 		dl := laneOfX(o.X+o.W/2) - l
@@ -451,7 +477,7 @@ func (g *Game) antiRow(e Car) bool {
 		if dl > 1 {
 			continue
 		}
-		if o.Y < e.Y+e.H+rowClear && e.Y < o.Y+o.H+rowClear {
+		if o.Y < e.Y+e.H+rc && e.Y < o.Y+o.H+rc {
 			return false
 		}
 	}
@@ -460,7 +486,7 @@ func (g *Game) antiRow(e Car) bool {
 	if dl < 0 {
 		dl = -dl
 	}
-	if dl <= 1 && p.Y < e.Y+e.H+rowClear && e.Y < p.Y+p.H+rowClear {
+	if dl <= 1 && p.Y < e.Y+e.H+rc && e.Y < p.Y+p.H+rc {
 		return false
 	}
 	return true
@@ -570,7 +596,8 @@ func (g *Game) updatePlaying() {
 	g.spawnTimer -= dt
 	if g.spawnTimer <= 0 {
 		if g.spawnEnemy() {
-			g.spawnTimer = math.Max(0.25, (120+rand.Float64()*120)/(math.Max(eff, 1)*diffMult[g.difficulty]))
+			st := diffSpawn[g.difficulty]
+			g.spawnTimer = (st.interval + rand.Float64()*st.span) / math.Max(eff, 1)
 		} else {
 			g.spawnTimer = 0.12
 		}
@@ -685,8 +712,9 @@ func (g *Game) topmostYInLane(l int) float64 {
 // свободных полос» не существует. Возвращает true, если заспавнено.
 func (g *Game) spawnEnemy() bool {
 	var cand []int
+	gap := diffSpawn[g.difficulty].platoonGap
 	for l := 0; l < laneCount; l++ {
-		if g.topmostYInLane(l) > spawnPlatoonGap {
+		if g.topmostYInLane(l) > gap {
 			cand = append(cand, l)
 		}
 	}
