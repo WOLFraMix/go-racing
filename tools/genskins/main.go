@@ -23,26 +23,14 @@ type kindDef struct {
 	dir          string
 	base         string
 	repaintLight bool
-	fixBumpers   bool // седан: ярко-красный бампер и декор красим, угловые огни сохраняем
+	fixBumpers   bool // седан: красим ярко-красный бампер и декор, фары и огни сохраняем по маске
 	skins        []skinDef
 }
-
-// Зоны света седана — в долях размеров спрайта, по оригиналу и по скрину из
-// игры (лучи фар идут от передних углов, стопы — у нижних углов).
-// Если на готовых скинах огни сядут чуть не туда — крутятся только эти числа:
-// sedanLightZone ниже — огни крупнее; sedanCornerKeep больше — огни шире.
-const (
-	sedanHeadZone   = 0.08 // выше этой доли высоты сидят кремовые фары
-	sedanLightZone  = 0.90 // ниже — зона задних огней и бампера
-	sedanCornerKeep = 0.20 // доля ширины с каждого края, остающаяся огнями
-)
 
 var kinds = []kindDef{
 	{
 		dir: "sedan", base: "assets/car_sedan.png", fixBumpers: true,
 		skins: []skinDef{
-			{name: "red", hex: "C42B2B"},
-			{name: "white", hex: "E8E9EB"},
 			{name: "silver", hex: "B9BEC6"},
 			{name: "graphite", hex: "3A3D42", stripe: "D8DADD"},
 			{name: "darkred", hex: "8C1F28"},
@@ -120,6 +108,17 @@ func main() {
 			panic(err)
 		}
 
+		var headMask, tailMask []bool
+		if kd.fixBumpers {
+			tmp := image.NewRGBA(image.Rect(0, 0, src.Bounds().Dx(), src.Bounds().Dy()))
+			for y := 0; y < src.Bounds().Dy(); y++ {
+				for x := 0; x < src.Bounds().Dx(); x++ {
+					tmp.Set(x, y, src.At(src.Bounds().Min.X+x, src.Bounds().Min.Y+y))
+				}
+			}
+			headMask, tailMask = lightMasks(tmp)
+		}
+
 		outDir := filepath.Join("assets", "skins", kd.dir)
 		if err := os.MkdirAll(outDir, 0o755); err != nil {
 			panic(err)
@@ -143,7 +142,7 @@ func main() {
 		}
 
 		for _, sk := range kd.skins {
-			img := repaint(src, hexColor(sk.hex), kd.repaintLight, kd.fixBumpers)
+			img := repaint(src, hexColor(sk.hex), kd.repaintLight, kd.fixBumpers, headMask, tailMask)
 			if sk.stripe != "" {
 				addStripe(img, hexColor(sk.stripe))
 			}
@@ -171,7 +170,7 @@ func main() {
 	fmt.Println("OK assets/skins/ambulance/ambulance.png")
 }
 
-func repaint(src image.Image, target color.RGBA, repaintLight, fixBumpers bool) *image.RGBA {
+func repaint(src image.Image, target color.RGBA, repaintLight, fixBumpers bool, headMask, tailMask []bool) *image.RGBA {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -242,20 +241,11 @@ func repaint(src image.Image, target color.RGBA, repaintLight, fixBumpers bool) 
 			protected := false
 
 			if fixBumpers {
-				// фары: кремовые точки в передних углах — не красим никогда
-				if float64(y) < sedanHeadZone*float64(h) && hh >= 15 && hh <= 80 && s < 0.5 && v > 0.85 {
-					protected = true
-				}
-				// ярко-красное: у нижней кромки остаются только угловые
-				// сегменты (огни), полоса бампера и весь декор — под кузов
-				if isBrightRed(c) {
-					inCorner := float64(x) < float64(w)*sedanCornerKeep ||
-						float64(x) >= float64(w)*(1-sedanCornerKeep)
-					if float64(y) >= sedanLightZone*float64(h) && inCorner {
-						protected = true
-					} else {
-						paint = true
-					}
+				idx := y*w + x
+				if headMask[idx] || tailMask[idx] {
+					protected = true // точные пиксели фар/огней с оригинала
+				} else if isBrightRed(c) {
+					paint = true // весь остальной ярко-красный — под кузов
 				}
 			} else {
 				// прежние правила для остальных типов — они работают
@@ -282,7 +272,7 @@ func repaint(src image.Image, target color.RGBA, repaintLight, fixBumpers bool) 
 			if paint && tLum > 0.55 && v < 0.35 && s > 0.3 {
 				paint = false
 			}
-			// серая фурнитура и номер — не красим
+			// серая фурнитура (бампер, хром) и номер — не красим
 			if paint && !repaintLight && s < 0.15 && v > 0.4 {
 				paint = false
 			}
@@ -303,6 +293,78 @@ func repaint(src image.Image, target color.RGBA, repaintLight, fixBumpers bool) 
 		}
 	}
 	return dst
+}
+
+// lightMasks снимает маски точных пикселей фар и задних огней с оригинала.
+// Фары: кремово-лососёвые пиксели в верхней зоне (вся пилюля целиком,
+// включая теневую половину: s<0.65 отличает её от ярких огней).
+// Огни: связные компоненты ярко-красного в нижней зоне шириной до трети
+// спрайта — полоса бампера (широкая компонента) в маску не попадает.
+func lightMasks(src *image.RGBA) (head, tail []bool) {
+	w, h := src.Bounds().Dx(), src.Bounds().Dy()
+	head = make([]bool, w*h)
+	tail = make([]bool, w*h)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			c := src.RGBAAt(x, y)
+			if c.A == 0 {
+				continue
+			}
+			hh, s, v := rgbToHSV(float64(c.R)/255, float64(c.G)/255, float64(c.B)/255)
+			if float64(y) < float64(h)*0.18 && hh <= 90 && s < 0.65 && v > 0.6 {
+				head[y*w+x] = true
+			}
+		}
+	}
+	// ярко-красные пиксели нижней зоны, разбитые на связные компоненты
+	seen := make([]bool, w*h)
+	for y := int(float64(h) * 0.75); y < h; y++ {
+		for x := 0; x < w; x++ {
+			idx := y*w + x
+			if seen[idx] || !isBrightRed(src.RGBAAt(x, y)) {
+				continue
+			}
+			// BFS по компоненте
+			var comp []int
+			stack := []int{idx}
+			seen[idx] = true
+			for len(stack) > 0 {
+				cur := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				comp = append(comp, cur)
+				cx, cy := cur%w, cur/w
+				for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+					nx, ny := cx+d[0], cy+d[1]
+					if nx < 0 || ny < 0 || nx >= w || ny >= h || ny < int(float64(h)*0.75) {
+						continue
+					}
+					ni := ny*w + nx
+					if !seen[ni] && isBrightRed(src.RGBAAt(nx, ny)) {
+						seen[ni] = true
+						stack = append(stack, ni)
+					}
+				}
+			}
+			// ширина компоненты: компактный блок = огонь, лента во всю
+			// ширину = бампер — его не защищаем
+			minx, maxx := w, 0
+			for _, i := range comp {
+				cx := i % w
+				if cx < minx {
+					minx = cx
+				}
+				if cx > maxx {
+					maxx = cx
+				}
+			}
+			if maxx-minx+1 <= w*32/100 {
+				for _, i := range comp {
+					tail[i] = true
+				}
+			}
+		}
+	}
+	return head, tail
 }
 
 func addStripe(img *image.RGBA, c color.RGBA) {
