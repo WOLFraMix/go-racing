@@ -11,7 +11,26 @@ type highScoreFile struct {
 
 type settingsFile struct {
 	Skin  int  `json:"skin"`
+	Stage int  `json:"stage"`
 	Muted bool `json:"muted"`
+}
+
+func (g *Game) readSettings() {
+	data, err := os.ReadFile("settings.json")
+	if err != nil {
+		return
+	}
+	var st settingsFile
+	if err := json.Unmarshal(data, &st); err == nil {
+		g.skinIdx = st.Skin
+		g.startStage = st.Stage
+		g.muted = st.Muted
+	}
+}
+
+func (g *Game) saveSettings() {
+	data, _ := json.Marshal(settingsFile{Skin: g.skinIdx, Stage: g.startStage, Muted: g.muted})
+	_ = os.WriteFile("settings.json", data, 0o644)
 }
 
 func (g *Game) readHighScore() {
@@ -28,21 +47,4 @@ func (g *Game) readHighScore() {
 func (g *Game) saveHighScore() {
 	data, _ := json.Marshal(highScoreFile{HighScore: g.highScore})
 	_ = os.WriteFile("highscore.json", data, 0o644)
-}
-
-func (g *Game) readSettings() {
-	data, err := os.ReadFile("settings.json")
-	if err != nil {
-		return
-	}
-	var st settingsFile
-	if err := json.Unmarshal(data, &st); err == nil {
-		g.skinIdx = st.Skin
-		g.muted = st.Muted
-	}
-}
-
-func (g *Game) saveSettings() {
-	data, _ := json.Marshal(settingsFile{Skin: g.skinIdx, Muted: g.muted})
-	_ = os.WriteFile("settings.json", data, 0o644)
 }

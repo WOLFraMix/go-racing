@@ -63,6 +63,8 @@ type Game struct {
 	highScore int
 	distance  float64
 
+	startStage int
+
 	playerBraking bool
 
 	// этапы
@@ -73,8 +75,6 @@ type Game struct {
 
 	audio *AudioSys
 	muted bool
-
-	lastTickFrame float64
 }
 
 func NewGame() *Game {
@@ -127,7 +127,7 @@ func (g *Game) timeScale() float64 {
 	return s
 }
 
-func (g *Game) reset() {
+func (g *Game) reset(startStage int) {
 	g.player = Car{
 		X:    laneCenterX(3, carW),
 		Y:    float64(playerYBase),
@@ -137,15 +137,15 @@ func (g *Game) reset() {
 	}
 	g.enemies = nil
 	g.particles = nil
-	g.scrollSpeed = stageDefs[0].ScrollStart
 	g.boost = 0
 	g.spawnTimer = 0
 	g.score = 0
 	g.distance = 0
-	g.stageIdx = 0
+	g.stageIdx = startStage % len(stageDefs)
 	g.stageTime = 0
 	g.stageLoop = 0
 	g.banner = 0
+	g.scrollSpeed = stageDefs[g.stageIdx].ScrollStart
 	g.readHighScore()
 }
 
@@ -283,7 +283,6 @@ func (g *Game) updatePlaying() {
 			e.NearMiss = true
 			dx := math.Abs((e.X + e.W/2) - (g.player.X + g.player.W/2))
 			if dx < (e.W+g.player.W)/2+8 {
-				g.audio.PlaySqueal(0.7, g.muted)
 				g.score += 1
 			}
 		}
@@ -303,15 +302,14 @@ func (g *Game) updatePlaying() {
 		if hit(g.player, e) {
 			g.state = StateGameOver
 			g.saveHighScore()
-			g.audio.PlayCrash(0.9, g.muted)
+			g.audio.PlayCrash(0.5, g.muted)
 			g.audio.SilenceEngine()
 			g.explode(g.player.X+g.player.W/2, g.player.Y+g.player.H/2)
 			break
 		}
 	}
 
-	g.audio.UpdateEngine(eff, g.muted)
-	g.updateBlinkerSound()
+	g.audio.UpdateEngine(eff, g.boost, dt, g.playerBraking, g.muted)
 }
 
 func (g *Game) updateStage(dt float64) {
@@ -366,35 +364,11 @@ func (g *Game) updateGameOver() {
 	g.updateEnemies(g.effectiveSpeed(), dt)
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
-		g.reset()
+		g.reset(g.startStage)
 		g.state = StatePlaying
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.state = StateMenu
-	}
-}
-
-// updateBlinkerSound — «тик-тик» поворотников ближайших машин.
-func (g *Game) updateBlinkerSound() {
-	if int(g.frame/10)%2 != 0 {
-		return
-	}
-	if g.frame-g.lastTickFrame < 9 {
-		return
-	}
-	for i := range g.enemies {
-		e := &g.enemies[i]
-		if e.Blink == 0 {
-			continue
-		}
-		dy := e.Y - g.player.Y
-		if dy < -250 || dy > 350 {
-			continue
-		}
-		prox := 1 - math.Min(1, math.Abs(dy)/350)
-		g.audio.PlayTick(0.12+0.3*prox, g.muted)
-		g.lastTickFrame = g.frame
-		return
 	}
 }
 
@@ -441,6 +415,8 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	vector.FillRect(screen, 0, 0, screenWidth, screenHeight, def.Grass, false)
 	vector.FillRect(screen, roadX0, 0, roadW, screenHeight, def.Asphalt, false)
 
+	g.drawScenery(screen, def)
+
 	edge := color.RGBA{R: 230, G: 200, B: 60, A: 255}
 	mark := color.RGBA{R: 235, G: 235, B: 200, A: 255}
 	if night {
@@ -459,6 +435,15 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 		}
 	}
 
+	// ночь: затемнение и лучи фар — под машинами, чтобы свет помогал, а не слепил
+	if night {
+		vector.FillRect(screen, 0, 0, screenWidth, screenHeight, color.RGBA{R: 8, G: 10, B: 30, A: 110}, false)
+		for _, e := range g.enemies {
+			drawHeadlights(screen, e)
+		}
+		drawHeadlights(screen, g.player)
+	}
+
 	for _, e := range g.enemies {
 		drawCar(screen, e, g.sprites[e.Kind])
 		drawBlinker(screen, e, e.Blink, int(g.frame))
@@ -467,15 +452,12 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	drawCar(screen, g.player, g.playerSkins[g.skinIdx])
 	drawBrakeLights(screen, g.player, g.playerBraking)
 
-	// ночь: затемнение + конусы фар + красные ореолы стопов
+	// ночь: задние габариты со свечением — поверх машин
 	if night {
-		vector.FillRect(screen, 0, 0, screenWidth, screenHeight, color.RGBA{R: 6, G: 8, B: 24, A: 150}, false)
 		for _, e := range g.enemies {
-			drawHeadlights(screen, e)
-			drawTailGlow(screen, e)
+			drawTailLights(screen, e)
 		}
-		drawHeadlights(screen, g.player)
-		drawTailGlow(screen, g.player)
+		drawTailLights(screen, g.player)
 	}
 
 	g.drawParticles(screen)

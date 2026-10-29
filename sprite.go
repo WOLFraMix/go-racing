@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	_ "image/png"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -96,24 +97,80 @@ func drawBrakeLights(dst *ebiten.Image, c Car, braking bool) {
 	}
 }
 
-// drawHeadlights — световое пятно перед машиной (все машины едут «вверх»).
-func drawHeadlights(dst *ebiten.Image, c Car) {
-	cx := float32(c.X + c.W/2)
-	layers := []struct {
-		r, off, a float32
-	}{
-		{30, 14, 80}, {55, 34, 55}, {88, 60, 32},
+// ---------- предрендеренный свет фар ----------
+
+var beamImg *ebiten.Image
+
+func clamp255(v float64) float64 {
+	if v > 255 {
+		return 255
 	}
-	for _, l := range layers {
-		col := color.RGBA{R: 255, G: 244, B: 190, A: uint8(l.a)}
-		vector.FillCircle(dst, cx, float32(c.Y)-l.off, l.r, col, false)
+	if v < 0 {
+		return 0
 	}
+	return v
 }
 
-// drawTailGlow — красный ореол стопов, виден ночью.
-func drawTailGlow(dst *ebiten.Image, c Car) {
-	vector.FillCircle(dst, float32(c.X+c.W/2), float32(c.Y+c.H+4), 14,
-		color.RGBA{R: 255, G: 60, B: 40, A: 60}, false)
+func init() {
+	const W, H = 128, 160
+	src := image.NewRGBA(image.Rect(0, 0, W, H))
+	cx := float64(W) / 2
+	for y := 0; y < H; y++ {
+		t := float64(H-1-y) / float64(H-1) // 0 у машины, 1 на дальнем конце
+		fall := (1 - t) * (1 - t)          // свет тает к дальнему концу
+		half := 0.20 + 0.46*t              // конус расходится к дальнему концу
+		for x := 0; x < W; x++ {
+			dx := math.Abs(float64(x)+0.5-cx) / (float64(W) / 2)
+			f := (half - dx) / 0.16 // мягкий край вместо резкой границы
+			if f > 1 {
+				f = 1
+			}
+			if f < 0 {
+				f = 0
+			}
+			a := uint8(clamp255(70 * fall * f))
+			if a == 0 {
+				continue
+			}
+			src.SetRGBA(x, y, color.RGBA{R: 255, G: 246, B: 212, A: a})
+		}
+	}
+	beamImg = ebiten.NewImageFromImage(src)
+}
+
+// drawHeadlights — мягкий рассеянный луч вперёд; рисуется ДО машин.
+func drawHeadlights(dst *ebiten.Image, c Car) {
+	if beamImg == nil {
+		return
+	}
+	const length = 165.0
+	w := c.W * 1.9 // ненамного шире машины — луч не выпирает по бокам
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(w/128, length/160)
+	op.GeoM.Translate(c.X+c.W/2-w/2, c.Y-length)
+	dst.DrawImage(beamImg, op)
+}
+
+// drawTailLights — два задних фонаря со свечением. Ночью горят всегда;
+// при торможении поверх дорисовываются яркие стопы drawBrakeLights.
+func drawTailLights(dst *ebiten.Image, c Car) {
+	lampW, lampH := 9.0, 5.0
+	y := c.Y + c.H - lampH - 2
+	lamps := []float64{c.X + 3, c.X + c.W - lampW - 3}
+
+	// мягкое свечение позади каждого фонаря
+	for _, lx := range lamps {
+		cxp := lx + lampW/2
+		vector.FillCircle(dst, float32(cxp), float32(y+lampH+1), 11,
+			color.RGBA{R: 255, G: 60, B: 40, A: 18}, false)
+		vector.FillCircle(dst, float32(cxp), float32(y+lampH+1), 5,
+			color.RGBA{R: 255, G: 70, B: 50, A: 32}, false)
+	}
+	// сами фонари — насыщенные тёмно-красные плашки
+	lamp := color.RGBA{R: 190, G: 30, B: 30, A: 235}
+	for _, lx := range lamps {
+		vector.FillRect(dst, float32(lx), float32(y), float32(lampW), float32(lampH), lamp, false)
+	}
 }
 
 // ---------- текст ----------

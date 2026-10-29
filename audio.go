@@ -14,18 +14,21 @@ const sampleRate = 44100
 // AudioSys — синтез звука без аудиофайлов.
 type AudioSys struct {
 	ctx    *audio.Context
-	engine []*audio.Player // 4 слоя «двигателя» с разной высотой тона
+	engine []*audio.Player // 6 слоёв «двигателя» разной высоты тона
 
-	squealBuf []byte
-	crashBuf  []byte
-	tickBuf   []byte
-	tick      *audio.Player
+	crashBuf []byte
+
+	lastGear   int
+	shiftTimer float64
+
+	rel, load float64 // сглаженные «обороты» и нагрузка
+	time      float64
 }
 
 func NewAudio() *AudioSys {
 	a := &AudioSys{ctx: audio.NewContext(sampleRate)}
 
-	for _, f := range []float64{55, 78, 102, 130} {
+	for _, f := range []float64{58, 74, 94, 120, 152, 194} {
 		buf := genEngineLoop(f, sampleRate)
 		loop := audio.NewInfiniteLoop(bytes.NewReader(buf), int64(len(buf)))
 		p, err := a.ctx.NewPlayer(loop)
@@ -36,16 +39,13 @@ func NewAudio() *AudioSys {
 		p.Play()
 		a.engine = append(a.engine, p)
 	}
-	a.squealBuf = genSqueal(sampleRate)
 	a.crashBuf = genCrash(sampleRate)
-	a.tickBuf = genTick(sampleRate)
-	a.tick, _ = a.ctx.NewPlayer(bytes.NewReader(a.tickBuf))
 	return a
 }
 
-// UpdateEngine — громкость слоёв зависит от скорости: слои перекрываются,
-// и тон двигателя непрерывно «растёт» с разгоном.
-func (a *AudioSys) UpdateEngine(eff float64, muted bool) {
+// UpdateEngine — обороты догоняют скорость с инерцией, нагрузка и тон
+// плавно меняются от газа и торможения, передачи переключаются с провалом.
+func (a *AudioSys) UpdateEngine(eff, boost, dt float64, braking, muted bool) {
 	if len(a.engine) == 0 {
 		return
 	}
@@ -53,20 +53,58 @@ func (a *AudioSys) UpdateEngine(eff float64, muted bool) {
 	if muted {
 		f = 0
 	}
-	ratio := (eff - 1.2) / 7.2
-	if ratio < 0 {
-		ratio = 0
+
+	// целевые обороты от фактической скорости
+	targetRel := (eff - 1.2) / 6.5
+	if targetRel < 0 {
+		targetRel = 0
 	}
-	if ratio > 1 {
-		ratio = 1
+	if targetRel > 1 {
+		targetRel = 1
 	}
-	pos := ratio * float64(len(a.engine)-1)
+	// инерция: звук «набирает» и «сбрасывает» обороты с задержкой,
+	// а не перескакивает мгновенно за скоростью
+	a.rel += (targetRel - a.rel) * math.Min(1, 2.2*dt)
+
+	// нагрузка: газ — громко, тормоз — тихо, переходы плавные
+	targetLoad := 0.32
+	if boost > 0.05 {
+		targetLoad = 0.85
+	}
+	if braking {
+		targetLoad = 0.12
+	}
+	a.load += (targetLoad - a.load) * math.Min(1, 6*dt)
+
+	a.time += dt
+
+	// передачи
+	const gears = 4
+	gearF := a.rel * (gears - 1)
+	gear := int(gearF)
+	frac := gearF - float64(gear)
+	if gear != a.lastGear && gear > 0 && gear < gears {
+		a.shiftTimer = 0.14
+	}
+	a.lastGear = gear
+	if a.shiftTimer > 0 {
+		a.shiftTimer -= dt
+	}
+
+	pos := a.rel * float64(len(a.engine)-1)
 	for i, p := range a.engine {
 		v := 1 - math.Abs(float64(i)-pos)
 		if v < 0 {
 			v = 0
 		}
-		p.SetVolume((0.02 + 0.10*v) * f)
+		// «дыхание» оборотов внутри передачи + лёгкая вибрация
+		wobble := 0.82 + 0.30*frac +
+			0.05*math.Sin(a.time*11.0) + 0.03*math.Sin(a.time*27.0)
+		vol := (0.008 + 0.050*a.load*v) * f * wobble
+		if a.shiftTimer > 0 {
+			vol *= 0.25
+		}
+		p.SetVolume(vol)
 	}
 }
 
@@ -74,27 +112,6 @@ func (a *AudioSys) SilenceEngine() {
 	for _, p := range a.engine {
 		p.SetVolume(0)
 	}
-}
-
-func (a *AudioSys) PlayTick(vol float64, muted bool) {
-	if muted || a.tick == nil {
-		return
-	}
-	_ = a.tick.Rewind()
-	a.tick.SetVolume(vol)
-	a.tick.Play()
-}
-
-func (a *AudioSys) PlaySqueal(vol float64, muted bool) {
-	if muted {
-		return
-	}
-	p, err := a.ctx.NewPlayer(bytes.NewReader(a.squealBuf))
-	if err != nil {
-		return
-	}
-	p.SetVolume(vol)
-	p.Play()
 }
 
 func (a *AudioSys) PlayCrash(vol float64, muted bool) {
@@ -105,7 +122,7 @@ func (a *AudioSys) PlayCrash(vol float64, muted bool) {
 	if err != nil {
 		return
 	}
-	p.SetVolume(vol)
+	p.SetVolume(vol * 0.5)
 	p.Play()
 }
 
@@ -147,22 +164,7 @@ func genEngineLoop(freq float64, sr int) []byte {
 	return toPCM(s)
 }
 
-// genSqueal — визг шин: ниспадающий вой с вибрато и шумом.
-func genSqueal(sr int) []byte {
-	n := sr / 2
-	s := make([]float64, n)
-	ph := 0.0
-	for i := 0; i < n; i++ {
-		t := float64(i) / float64(sr)
-		f := (1500 - 600*t) * (1 + 0.02*math.Sin(2*math.Pi*11*t))
-		ph += 2 * math.Pi * f / float64(sr)
-		env := math.Min(1, t*40) * math.Exp(-3*t)
-		s[i] = (0.7*math.Sin(ph) + 0.3*(rand.Float64()*2-1)) * env * 0.5
-	}
-	return toPCM(s)
-}
-
-// genCrash — удар: шумовой всплеск + низкочастотный гул с затуханием.
+// genCrash — мягкий удар: шумовой всплеск + низкочастотный гул.
 func genCrash(sr int) []byte {
 	n := sr * 4 / 5
 	s := make([]float64, n)
@@ -173,17 +175,6 @@ func genCrash(sr int) []byte {
 		low = low*0.96 + w*0.04
 		env := math.Exp(-4.5*t) + 2*math.Exp(-40*t)
 		s[i] = (0.8*w + 2.5*low) * env * 0.6
-	}
-	return toPCM(s)
-}
-
-// genTick — короткий «тик» поворотника.
-func genTick(sr int) []byte {
-	n := sr * 40 / 1000
-	s := make([]float64, n)
-	for i := 0; i < n; i++ {
-		t := float64(i) / float64(sr)
-		s[i] = math.Sin(2*math.Pi*1100*t) * math.Exp(-t*120) * 0.8
 	}
 	return toPCM(s)
 }
