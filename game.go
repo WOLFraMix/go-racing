@@ -29,6 +29,10 @@ const (
 	playerYBase = screenHeight - 210
 )
 
+// множитель плотности спавна по сложности
+var diffMult = [...]float64{1.0, 1.5, 2.0}
+var diffNames = [...]string{"EASY", "MEDIUM", "HARD"}
+
 type State int
 
 const (
@@ -77,6 +81,7 @@ type Game struct {
 	muted      bool
 	skinIdx    int
 	startStage int
+	difficulty int // 0 — easy, 1 — medium, 2 — hard
 
 	audio *AudioSys
 
@@ -121,6 +126,9 @@ func NewGame() *Game {
 	}
 	g.readSettings()
 	g.readHighScore()
+	if g.difficulty < 0 || g.difficulty >= len(diffMult) {
+		g.difficulty = 0
+	}
 	if g.skinIdx < 0 || g.skinIdx >= len(g.playerSkins) {
 		g.skinIdx = 0
 	}
@@ -276,7 +284,7 @@ func (g *Game) updatePlaying() {
 	g.spawnTimer -= dt
 	if g.spawnTimer <= 0 {
 		g.spawnEnemy()
-		g.spawnTimer = (260 + rand.Float64()*260) / math.Max(eff, 1)
+		g.spawnTimer = (260 + rand.Float64()*260) / (math.Max(eff, 1) * diffMult[g.difficulty])
 	}
 
 	// ИИ врагов: eff/60 — px за кадр (единицы OwnSpeed), 60*dt — dt в кадрах

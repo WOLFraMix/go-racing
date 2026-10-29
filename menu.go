@@ -48,6 +48,7 @@ func (g *Game) updateMenu() error {
 		g.muted = !g.muted
 		g.saveSettings()
 	}
+
 	// выбор раскраски
 	if inpututil.IsKeyJustPressed(ebiten.KeyLeft) {
 		g.skinIdx = (g.skinIdx + len(g.playerSkins) - 1) % len(g.playerSkins)
@@ -57,6 +58,13 @@ func (g *Game) updateMenu() error {
 		g.skinIdx = (g.skinIdx + 1) % len(g.playerSkins)
 		g.saveSettings()
 	}
+
+	// выбор сложности
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
+		g.difficulty = (g.difficulty + 1) % len(diffMult)
+		g.saveSettings()
+	}
+
 	// выбор стартовой локации
 	if inpututil.IsKeyJustPressed(ebiten.KeyUp) {
 		g.startStage = (g.startStage + len(stageDefs) - 1) % len(stageDefs)
@@ -144,9 +152,10 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	// ---------- подсказки ----------
 	hintY := cardsY + cardH + 66
 	drawTextCentered(screen, "ENTER — гонка", hintY, 17, color.RGBA{R: 120, G: 255, B: 120, A: 255})
-	drawTextCentered(screen, "W/S — газ и тормоз, ← → — руль", hintY+30, 14, grey)
-	drawTextCentered(screen, "P — пауза, M — звук вкл/выкл", hintY+52, 14, grey)
-	drawTextCentered(screen, fmt.Sprintf("Best: %d", g.highScore), hintY+88, 18,
+	drawTextCentered(screen, "TAB — сложность: "+diffNames[g.difficulty], hintY+30, 16, gold)
+	drawTextCentered(screen, "W/S — газ и тормоз, ← → — руль", hintY+54, 14, grey)
+	drawTextCentered(screen, "P — пауза, M — звук вкл/выкл", hintY+76, 14, grey)
+	drawTextCentered(screen, fmt.Sprintf("Best: %d", g.highScore), hintY+112, 18,
 		color.RGBA{R: 120, G: 220, B: 255, A: 255})
-	drawTextCentered(screen, "ESC — выход", hintY+120, 14, grey)
+	drawTextCentered(screen, "ESC — выход", hintY+144, 14, grey)
 }
