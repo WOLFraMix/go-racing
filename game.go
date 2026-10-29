@@ -89,6 +89,9 @@ type Game struct {
 	sprites     map[CarKind]Sprite
 	playerSkins []Sprite
 	skinNames   []string
+
+	// сгенерированные варианты скинов врагов: перекраска + детали
+	enemyVariants map[CarKind][]Sprite
 }
 
 // ---------- загрузка спрайтов ----------
@@ -125,6 +128,18 @@ func NewGame() *Game {
 		g.playerSkins = append(g.playerSkins, loadSprite("assets/"+m.file, m.fallback))
 		g.skinNames = append(g.skinNames, m.name)
 	}
+
+	// паки скинов врагов — обычные файлы в assets/skins/<тип>/
+	g.enemyVariants = map[CarKind][]Sprite{
+		KindSedan:     loadSkinPack("assets/skins/sedan", g.sprites[KindSedan]),
+		KindSport:     loadSkinPack("assets/skins/sport", g.sprites[KindSport]),
+		KindSUV:       loadSkinPack("assets/skins/suv", g.sprites[KindSUV]),
+		KindMinibus:   loadSkinPack("assets/skins/minibus", g.sprites[KindMinibus]),
+		KindBus:       loadSkinPack("assets/skins/bus", g.sprites[KindBus]),
+		KindTruck:     loadSkinPack("assets/skins/truck", g.sprites[KindTruck]),
+		KindAmbulance: loadSkinPack("assets/skins/ambulance", g.sprites[KindAmbulance]),
+	}
+
 	g.readSettings()
 	g.readHighScore()
 	if g.difficulty < 0 || g.difficulty >= len(diffMult) {
@@ -151,6 +166,8 @@ func (g *Game) reset(startStage int) {
 	g.enemies = nil
 	g.sparks = nil
 	g.boost = 0
+	g.playerBraking = false
+	g.yOff = 0
 	g.spawnTimer = 0.8
 	g.bonus = 0
 	g.distance = 0
@@ -386,7 +403,8 @@ func (g *Game) updateGameOver() {
 }
 
 // spawnEnemy — через фабрику RandomEnemy из car.go, с проверкой,
-// что верхняя часть полосы свободна.
+// что верхняя часть полосы свободна. Каждой машине выдаётся случайный
+// вариант скина из сгенерированного набора.
 func (g *Game) spawnEnemy() {
 	lx := rand.Intn(laneCount)
 	lcx := laneCenterX(lx, carW)
@@ -395,7 +413,11 @@ func (g *Game) spawnEnemy() {
 			return // полоса сверху занята — пропускаем спавн
 		}
 	}
-	g.enemies = append(g.enemies, RandomEnemy(lx))
+	e := RandomEnemy(lx)
+	if len(g.enemyVariants[e.Kind]) > 0 {
+		e.Skin = rand.Intn(len(g.enemyVariants[e.Kind]))
+	}
+	g.enemies = append(g.enemies, e)
 }
 
 // ---------- отрисовка ----------
@@ -441,13 +463,13 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	}
 
 	for _, e := range g.enemies {
-		sp := g.sprites[e.Kind]
-		drawCar(screen, e, &sp)
+		skin := g.enemyVariants[e.Kind][e.Skin]
+		drawCar(screen, e, skin.Img)
 		drawBlinker(screen, e, e.Blink, int(g.frame))
 		drawBrakeLights(screen, e, e.Braking)
 	}
 	ps := g.playerSkins[g.skinIdx]
-	drawCar(screen, playerDraw, &ps)
+	drawCar(screen, playerDraw, ps.Img)
 	drawBrakeLights(screen, playerDraw, g.playerBraking)
 
 	// ночь: габариты и стоп-сигналы — после машин, поверх корпуса

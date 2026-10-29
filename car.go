@@ -53,6 +53,7 @@ type Car struct {
 	Braking    bool
 	NearMiss   bool
 	Points     int
+	Skin       int // индекс варианта скина среди сгенерированных
 }
 
 // randomSpeed — рандомизация скорости: 80–120% от базовой.

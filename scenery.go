@@ -104,16 +104,6 @@ func (g *Game) drawHighwayRow(screen *ebiten.Image, y float64, h int) {
 	vector.FillRect(screen, x, float32(y-18), 6, 9, sign, false)
 }
 
-func clamp01(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
-}
-
 // drawNightRow — фонари: столбик на обочине и тёплое пятно света на асфальте.
 // Ряды плавно проявляются сверху и тают снизу — без «выскакивания».
 func (g *Game) drawNightRow(screen *ebiten.Image, y float64, h int) {

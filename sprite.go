@@ -34,18 +34,11 @@ func LoadSprite(name string, fallback color.RGBA) *Sprite {
 	return s
 }
 
-func drawCar(dst *ebiten.Image, c Car, s *Sprite) {
-	if s.Img != nil {
-		op := &ebiten.DrawImageOptions{}
-		bw, bh := float64(s.Img.Bounds().Dx()), float64(s.Img.Bounds().Dy())
-		if bw > 0 && bh > 0 {
-			op.GeoM.Scale(c.W/bw, c.H/bh)
-		}
-		op.GeoM.Translate(c.X, c.Y)
-		dst.DrawImage(s.Img, op)
-		return
-	}
-	vector.FillRect(dst, float32(c.X), float32(c.Y), float32(c.W), float32(c.H), s.Fill, false)
+func drawCar(dst *ebiten.Image, c Car, img *ebiten.Image) {
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(c.W/float64(img.Bounds().Dx()), c.H/float64(img.Bounds().Dy()))
+	op.GeoM.Translate(c.X, c.Y)
+	dst.DrawImage(img, op)
 }
 
 // drawBlinker — мигающие поворотники: задний и передний.
