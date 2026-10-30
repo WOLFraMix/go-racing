@@ -138,6 +138,10 @@ type Game struct {
 
 	smGrass, smAsphalt, smMark color.RGBA
 	smNight                    float64
+
+	turbo     float64 // активность турбо 0..1
+	turboHeat float64 // нагрев 0..1: 1 — выдохся, остывает при отпускании
+	turboLock bool    // перегрелся при зажатом Shift — блокировка до отпускания
 }
 
 // ---------- загрузка спрайтов ----------
@@ -228,6 +232,9 @@ func (g *Game) reset(startStage int) {
 	g.stageTime = stageTransition / 2
 	g.stageLoop = 0
 	g.banner = 2.0
+	g.turbo = 0
+	g.turboHeat = 0
+	g.turboLock = false
 	g.sirenOn = false
 	g.audio.SetSiren(false, g.muted)
 	g.scrollSpeed = stageDefs[g.stageIdx].ScrollStart
@@ -564,12 +571,37 @@ func (g *Game) updatePlaying() {
 		g.boost += (0 - g.boost) * math.Min(1, 4*dt)
 	}
 
+	// турбо: удержание Shift — тяга с перегревом.
+	// Перегрелся — блокируется до отпускания Shift, иначе получился бы
+	// пилообразный цикл «остыл на миг — снова включился» = вечное турбо.
+	shiftHeld := ebiten.IsKeyPressed(ebiten.KeyShift) ||
+		ebiten.IsKeyPressed(ebiten.KeyShiftLeft) ||
+		ebiten.IsKeyPressed(ebiten.KeyShiftRight)
+	if shiftHeld && !g.turboLock && g.turboHeat < 1.0 {
+		g.turbo += (1 - g.turbo) * math.Min(1, 8*dt)
+		g.turboHeat += 0.20 * dt // полный бак горит ~5 с
+		if g.turboHeat >= 1.0 {
+			g.turboLock = true
+		}
+	} else {
+		g.turbo += (0 - g.turbo) * math.Min(1, 6*dt)
+		g.turboHeat -= 0.22 * dt // остывает за ~4.5 с
+		// разблокировка только после отпускания Shift и заметного остывания
+		if !shiftHeld && g.turboHeat < 0.6 {
+			g.turboLock = false
+		}
+	}
+	g.turbo = clamp(g.turbo, 0, 1)
+	g.turboHeat = clamp(g.turboHeat, 0, 1)
+
 	// «клевок» машины: тормоз — назад, газ — вперёд.
 	// Сдвиг входит в логическую позицию g.player.Y: спрайт и хитбокс
 	// всегда в одном месте, расхождение невозможно по построению.
 	targetYOff := 0.0
 	if g.playerBraking {
 		targetYOff = 24.0
+	} else if g.turbo > 0.5 {
+		targetYOff = -20.0
 	} else if g.boost > 0.5 {
 		targetYOff = -14.0
 	}
@@ -613,7 +645,7 @@ func (g *Game) updatePlaying() {
 		target = prev.ScrollMax + (target-prev.ScrollMax)*bt
 	}
 	g.scrollSpeed += (target - g.scrollSpeed) * math.Min(1, 2*dt)
-	eff := g.scrollSpeed * (1 + 0.35*g.boost)
+	eff := g.scrollSpeed * (1 + 0.35*g.boost + 0.55*g.turbo)
 	if g.playerBraking {
 		eff *= 0.6
 	}
@@ -624,7 +656,7 @@ func (g *Game) updatePlaying() {
 	g.distance += mark / 30
 
 	// звук мотора
-	g.audio.UpdateEngine(eff/100, g.boost, dt, g.playerBraking, g.muted)
+	g.audio.UpdateEngine(eff/100, math.Max(g.boost, g.turbo), dt, g.playerBraking, g.muted)
 
 	// глобальный кулдаун перестроений: не чаще одного манёвра на дорогу
 	if g.changePause > 0 {
@@ -843,7 +875,9 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	ps := g.playerSkins[g.skinIdx]
 	drawCar(screen, playerDraw, ps.Img)
 	drawBrakeLights(screen, playerDraw, g.playerBraking)
-
+	if g.turbo > 0.04 {
+		g.drawTurboFlame(screen, playerDraw)
+	}
 	if g.sirenOn && beaconSkins[g.skinNames[g.skinIdx]] {
 		drawBeacons(screen, playerDraw, int(g.frame))
 	}
@@ -865,7 +899,7 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 
 func (g *Game) drawHUD(screen *ebiten.Image) {
 	def := g.currentDef()
-	eff := g.scrollSpeed * (1 + 0.35*g.boost)
+	eff := g.scrollSpeed * (1 + 0.35*g.boost + 0.55*g.turbo)
 	if g.playerBraking {
 		eff *= 0.6
 	}
@@ -875,9 +909,6 @@ func (g *Game) drawHUD(screen *ebiten.Image) {
 	grey := color.RGBA{R: 200, G: 200, B: 210, A: 255}
 	green := color.RGBA{R: 120, G: 255, B: 120, A: 255}
 
-	drawText(screen, fmt.Sprintf("A: %d %d %d N: %.2f",
-		g.smAsphalt.R, g.smAsphalt.G, g.smAsphalt.B, g.smNight), 12, 118, 14, grey)
-
 	drawText(screen, fmt.Sprintf("Score: %d", g.curScore()), 12, 10, 20, gold)
 	drawText(screen, fmt.Sprintf("Best: %d", g.highScore), 12, 38, 20, cyan)
 	drawText(screen, fmt.Sprintf("Speed: %d km/h", int(eff*0.3)), 12, 66, 18, green)
@@ -885,6 +916,32 @@ func (g *Game) drawHUD(screen *ebiten.Image) {
 	drawTextCentered(screen, def.Name, 14, 18, grey)
 	if g.muted {
 		drawTextCentered(screen, "MUTED (M)", 42, 16, grey)
+	}
+
+	// шкала турбо: справа напротив скорости; полная — перегрев
+	if g.turboHeat > 0.01 || g.turbo > 0.01 {
+		bx := screenWidth - 156
+		bw := 144
+		by := 68
+
+		vector.FillRect(screen, float32(bx), float32(by), float32(bw), 14,
+			color.RGBA{R: 20, G: 22, B: 30, A: 200}, false)
+
+		// заполнение = остаток ресурса (1 - нагрев), голубая полоса
+		avail := bw - 4
+		vector.FillRect(screen, float32(bx+2), float32(by+2),
+			float32(int(float64(avail)*(1-g.turboHeat))), 10,
+			color.RGBA{R: 80, G: 170, B: 255, A: 255}, false)
+
+		// почти перегрелся — рамка мигает красным
+		if g.turboHeat > 0.85 {
+			if int(g.frame/8)%2 == 0 {
+				vector.FillRect(screen, float32(bx), float32(by), float32(bw), 14,
+					color.RGBA{R: 255, G: 70, B: 60, A: 120}, false)
+			}
+			drawTextCenteredX(screen, "TURBO HOT", bx+bw/2, by+1, 10,
+				color.RGBA{R: 255, G: 120, B: 110, A: 255})
+		}
 	}
 }
 
@@ -911,6 +968,34 @@ func beaconRect(c Car) (bx, by, bw, bh float64) {
 		return c.X + 30*sx, c.Y + 64*sy, 46 * sx, 16 * sy
 	}
 	return c.X + 24*sx, c.Y + 64*sy, 58 * sx, 16 * sy
+}
+
+// drawTurboFlame — синее пламя из выхлопных патрубков при турбо.
+// Два факела у заднего бампера: белое ядро, синий ореол, тёмно-синий
+// хвост. Дрожание — по кадру, длина растёт с активностью турбо.
+func (g *Game) drawTurboFlame(screen *ebiten.Image, c Car) {
+	sx := c.W / 106.0
+	sy := c.H / 152.0
+	cx := c.X + c.W/2
+	y0 := c.Y + c.H - 4*sy
+
+	flick := 0.8 + 0.2*math.Sin(float64(g.frame)*1.9)
+	jit := math.Sin(float64(g.frame)*13.0) * 2.0 * sx
+	fade := g.turbo * g.turbo // пламя разгоняется вместе с тягой
+
+	// один патрубок — правый, чуть правее центра бампера
+	x := cx + 16*sx
+	L := (34*flick + 12) * sx * fade
+
+	// хвост: тёмно-синий
+	vector.FillCircle(screen, float32(x+jit), float32(y0+L*0.85), float32(5.5*sx*fade),
+		color.RGBA{R: 30, G: 60, B: 200, A: 90}, false)
+	// середина: ярко-синий
+	vector.FillCircle(screen, float32(x), float32(y0+L*0.5), float32(5*sx*fade),
+		color.RGBA{R: 60, G: 130, B: 255, A: 170}, false)
+	// ядро у патрубка: белое с голубым
+	vector.FillCircle(screen, float32(x), float32(y0+4*sy), float32(4*sx),
+		color.RGBA{R: 235, G: 245, B: 255, A: uint8(220 * fade)}, false)
 }
 
 // drawBeacons — мигание маячков поверх спрайта + свечение вокруг.
