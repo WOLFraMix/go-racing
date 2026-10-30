@@ -23,6 +23,8 @@ type AudioSys struct {
 
 	rel, load float64 // сглаженные «обороты» и нагрузка
 	time      float64
+
+	siren *audio.Player
 }
 
 func NewAudio() *AudioSys {
@@ -40,7 +42,26 @@ func NewAudio() *AudioSys {
 		a.engine = append(a.engine, p)
 	}
 	a.crashBuf = genCrash(sampleRate)
+	buf := genSiren(sampleRate)
+	loop := audio.NewInfiniteLoop(bytes.NewReader(buf), int64(len(buf)))
+	if sp, err := a.ctx.NewPlayer(loop); err == nil {
+		sp.SetVolume(0)
+		sp.Play()
+		a.siren = sp
+	}
 	return a
+}
+
+// SetSiren — сирена играется, только если включена и не замьючена.
+func (a *AudioSys) SetSiren(on, muted bool) {
+	if a.siren == nil {
+		return
+	}
+	if on && !muted {
+		a.siren.SetVolume(0.10)
+	} else {
+		a.siren.SetVolume(0)
+	}
 }
 
 // UpdateEngine — обороты догоняют скорость с инерцией, нагрузка и тон
@@ -122,7 +143,7 @@ func (a *AudioSys) PlayCrash(vol float64, muted bool) {
 	if err != nil {
 		return
 	}
-	p.SetVolume(vol * 0.15)
+	p.SetVolume(vol * 0.05)
 	p.Play()
 }
 
@@ -175,6 +196,24 @@ func genCrash(sr int) []byte {
 		low = low*0.96 + w*0.04
 		env := math.Exp(-4.5*t) + 2*math.Exp(-40*t)
 		s[i] = (0.8*w + 2.5*low) * env * 0.6
+	}
+	return toPCM(s)
+}
+
+// genSiren — «вау»-сирена: тон плавно завывает между 620 и 850 Гц.
+// Целое число периодов ЛЧМ на длину буфера → бесшовный луп.
+func genSiren(sr int) []byte {
+	const T = 2.0 // период одного завывания, сек
+	n := int(float64(sr) * T)
+	s := make([]float64, n)
+	ph := 0.0
+	for i := 0; i < n; i++ {
+		t := float64(i) / float64(sr)
+		f := 620.0 + 230.0*math.Sin(2*math.Pi*t/T)
+		ph += 2 * math.Pi * f / float64(sr) // накопленная фаза — иначе свип «щёлкнет» на стыке
+		v := 0.55*math.Sin(ph) + 0.25*math.Sin(2*ph)
+		env := 0.85 + 0.15*math.Sin(2*math.Pi*t/T+math.Pi) // чуть громче на пике тона
+		s[i] = v * env * 0.35
 	}
 	return toPCM(s)
 }

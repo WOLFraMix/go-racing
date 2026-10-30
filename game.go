@@ -112,6 +112,8 @@ type Game struct {
 
 	frame float64
 
+	sirenOn bool // проблесковые маячки (только полицейский скин)
+
 	muted      bool
 	skinIdx    int
 	startStage int
@@ -221,6 +223,8 @@ func (g *Game) reset(startStage int) {
 	g.stageTime = stageTransition / 2
 	g.stageLoop = 0
 	g.banner = 2.0
+	g.sirenOn = false
+	g.audio.SetSiren(false, g.muted)
 	g.scrollSpeed = stageDefs[g.stageIdx].ScrollStart
 	g.readHighScore()
 }
@@ -235,14 +239,17 @@ func (g *Game) Update() error {
 	switch g.state {
 	case StateMenu:
 		g.audio.SilenceEngine() // в меню мотор молчит
+		g.audio.SetSiren(false, g.muted)
 		return g.updateMenu()
 	case StatePlaying:
 		g.updatePlaying()
 	case StatePaused:
 		g.audio.SilenceEngine()
+		g.audio.SetSiren(false, g.muted)
 		g.updatePaused()
 	case StateGameOver:
 		g.audio.SilenceEngine()
+		g.audio.SetSiren(false, g.muted)
 		g.updateGameOver()
 	}
 	return nil
@@ -509,6 +516,10 @@ func (g *Game) updatePlaying() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyM) {
 		g.muted = !g.muted
 		g.saveSettings()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+		g.sirenOn = !g.sirenOn
+		g.audio.SetSiren(g.sirenOn, g.muted)
 	}
 
 	// руль: поворотник в «кадрах», как у врагов
@@ -793,6 +804,10 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	drawCar(screen, playerDraw, ps.Img)
 	drawBrakeLights(screen, playerDraw, g.playerBraking)
 
+	if g.sirenOn && beaconSkins[g.skinNames[g.skinIdx]] {
+		drawBeacons(screen, playerDraw, int(g.frame))
+	}
+
 	// габариты и стоп-сигналы — после машин, поверх корпуса
 	if dark > 0.001 {
 		for _, e := range g.enemies {
@@ -840,6 +855,73 @@ func (g *Game) drawBanner(screen *ebiten.Image) {
 	}
 	clr := color.RGBA{R: 255, G: 210, B: 60, A: uint8(255 * a)}
 	drawTextCentered(screen, stageDefs[g.stageIdx].Name, 160, 44, clr)
+}
+
+// beaconSkins — скины с маячками на крыше (координаты балки: 24..82 × 64..80
+// на холсте спрайта 106×152).
+var beaconSkins = map[string]bool{
+	"PATRIOT POLICE": true,
+}
+
+// drawBeacons — мигание маячков поверх спрайта + свечение вокруг.
+// Координаты балки с спрайта переводятся в рект машины пропорционально.
+func drawBeacons(screen *ebiten.Image, c Car, frame int) {
+	sx, sy := c.W/106.0, c.H/152.0
+	bx, by := c.X+24*sx, c.Y+64*sy
+	bw, bh := 58*sx, 16*sy
+
+	ph := (frame / 12) % 2 // такт мигания: ~0.2 с на фазу
+	redA, blueA := uint8(50), uint8(50)
+	if ph == 0 {
+		redA = 230
+	} else {
+		blueA = 230
+	}
+
+	cxL := bx + bw*0.25 // центры половин балки
+	cxR := bx + bw*0.75
+	cy := by + bh/2
+
+	// ---------- свечение: компактные ореолы в пределах крыши ----------
+	// активная сторона светит ярче, пассивная — тлеет
+	ra, ba := uint8(28), uint8(28)
+	if ph == 0 {
+		ra = 75
+	} else {
+		ba = 75
+	}
+	for _, layer := range [3]struct {
+		r    float64
+		mulA float64
+	}{
+		{22 * sx, 0.45},
+		{16 * sx, 0.75},
+		{12 * sx, 1.0},
+	} {
+		ga := uint8(float64(ra) * layer.mulA)
+		gb := uint8(float64(ba) * layer.mulA)
+		vector.FillCircle(screen, float32(cxL), float32(cy), float32(layer.r),
+			color.RGBA{R: 255, G: 60, B: 50, A: ga}, false)
+		vector.FillCircle(screen, float32(cxR), float32(cy), float32(layer.r),
+			color.RGBA{R: 60, G: 110, B: 255, A: gb}, false)
+	}
+
+	// ---------- сами маячки ----------
+	vector.FillRect(screen, float32(bx), float32(by), float32(bw/2), float32(bh),
+		color.RGBA{R: 255, G: 40, B: 40, A: redA}, false)
+	vector.FillRect(screen, float32(bx+bw/2), float32(by), float32(bw/2), float32(bh),
+		color.RGBA{R: 40, G: 90, B: 255, A: blueA}, false)
+
+	// блик-вспышка на активной половине
+	if ph == 0 {
+		vector.FillRect(screen, float32(bx+2*sx), float32(by+2*sy),
+			float32(bw/2-4*sx), float32(3*sy),
+			color.RGBA{R: 255, G: 210, B: 200, A: 200}, false)
+	} else {
+		vector.FillRect(screen, float32(bx+bw/2+2*sx), float32(by+2*sy),
+			float32(bw/2-4*sx), float32(3*sy),
+			color.RGBA{R: 200, G: 225, B: 255, A: 200}, false)
+	}
 }
 
 func (g *Game) drawPause(screen *ebiten.Image) {
