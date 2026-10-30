@@ -27,9 +27,26 @@ var stageDefs = []StageDef{
 }
 
 // lerpColor — линейное смешение цветов, t от 0 (a) до 1 (b).
+// Важно: простое uint8(v) усекает дробь, и при малых t канал
+// «замирает», не дойдя до цели — сглаживание в updatePlaying
+// вызывает lerpColor с шагом меньше единицы, и усечение съедало
+// его целиком: светлые каналы навсегда оставались тёмными.
+// Поэтому округляем до ближайшего и, если шаг не сдвинул канал,
+// гарантированно шагаем на единицу к цели.
 func lerpColor(a, b color.RGBA, t float64) color.RGBA {
 	mix := func(x, y uint8) uint8 {
-		return uint8(float64(x) + (float64(y)-float64(x))*t)
+		if x == y || t <= 0 {
+			return x
+		}
+		r := uint8(float64(x) + (float64(y)-float64(x))*t + 0.5)
+		if r == x { // шаг меньше 0.5 — принудительный минимальный шаг
+			if y > x {
+				r = x + 1
+			} else {
+				r = x - 1
+			}
+		}
+		return r
 	}
 	return color.RGBA{R: mix(a.R, b.R), G: mix(a.G, b.G), B: mix(a.B, b.B), A: 255}
 }

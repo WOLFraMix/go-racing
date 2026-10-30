@@ -627,7 +627,7 @@ func (g *Game) updatePlaying() {
 	def = g.currentDef()
 
 	// переход этапов
-	k := math.Min(1, 0.7*dt)
+	k := math.Min(1, 0.5*dt)
 
 	g.smGrass = lerpColor(g.smGrass, def.Grass, k)
 	g.smAsphalt = lerpColor(g.smAsphalt, def.Asphalt, k)
@@ -669,9 +669,12 @@ func (g *Game) updatePlaying() {
 	if g.spawnTimer <= 0 {
 		if g.spawnEnemy() {
 			st := diffSpawn[g.difficulty]
-			g.spawnTimer = (st.interval + rand.Float64()*st.span) / math.Max(eff, 1)
+			// множитель 1.4 — реже на ~30%: раньше машины успевали
+			// смыкаться в сплошные полосы до того, как игрок их разберёт
+			g.spawnTimer = (st.interval + rand.Float64()*st.span) /
+				math.Max(eff, 1) * 1.4
 		} else {
-			g.spawnTimer = 0.12
+			g.spawnTimer = 0.25 // спокойнее ретрай: было 0.12
 		}
 	}
 

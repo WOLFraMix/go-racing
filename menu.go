@@ -83,7 +83,7 @@ func (g *Game) updateMenu() error {
 		g.startStage = (g.startStage + 1) % len(stageDefs)
 		g.saveSettings()
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
 		g.reset(g.startStage)
 		g.state = StatePlaying
 	}
@@ -176,8 +176,10 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	drawTextCentered(screen, "ENTER — гонка", hintY, 17, color.RGBA{R: 120, G: 255, B: 120, A: 255})
 	drawTextCentered(screen, "TAB — сложность: "+diffNames[g.difficulty], hintY+30, 16, gold)
 	drawTextCentered(screen, "W/S — газ и тормоз, ← → — руль", hintY+54, 14, grey)
-	drawTextCentered(screen, "P — пауза, M — звук вкл/выкл", hintY+76, 14, grey)
-	drawTextCentered(screen, fmt.Sprintf("Best: %d", g.highScore), hintY+112, 18,
+	drawTextCentered(screen, "SPACE — сигнал, у ПАТРИОТа — сирена", hintY+74, 14, grey)
+	drawTextCentered(screen, "SHIFT — турбо-ускорение", hintY+94, 14, grey)
+	drawTextCentered(screen, "P — пауза, M — звук вкл/выкл", hintY+114, 14, grey)
+	drawTextCentered(screen, fmt.Sprintf("Best: %d", g.highScore), hintY+148, 18,
 		color.RGBA{R: 120, G: 220, B: 255, A: 255})
-	drawTextCentered(screen, "ESC — выход", hintY+144, 14, grey)
+	drawTextCentered(screen, "ESC — выход", hintY+180, 14, grey)
 }
