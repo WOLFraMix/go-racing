@@ -73,11 +73,76 @@ func (g *Game) drawDecorFor(screen *ebiten.Image, name string) {
 			g.drawHighwayRow(screen, y, h)
 		case "NIGHT":
 			g.drawNightRow(screen, y, h)
+		case "BRIDGE":
+			g.drawBridgeRow(screen, y, h)
 		}
 	}
-
 	if name == "HIGHWAY" {
 		g.drawRails(screen)
+	}
+	if name == "BRIDGE" {
+		g.drawBridgeRails(screen)
+	}
+}
+
+// drawBridgeRails — бетонные парапеты моста вместо отбойников.
+// Непрерывные, как рельсы шоссе, — тают и проявляются вместе с этапом.
+func (g *Game) drawBridgeRails(screen *ebiten.Image) {
+	conc := color.RGBA{R: 172, G: 174, B: 182, A: 255}
+	concHi := color.RGBA{R: 204, G: 206, B: 212, A: 255}
+	concDark := color.RGBA{R: 122, G: 124, B: 132, A: 255}
+	// левый парапет
+	vector.FillRect(screen, float32(roadX0-11), 0, 9, screenHeight, concDark, false)
+	vector.FillRect(screen, float32(roadX0-11), 0, 7, screenHeight, conc, false)
+	vector.FillRect(screen, float32(roadX0-11), 0, 2, screenHeight, concHi, false)
+	// правый парапет
+	vector.FillRect(screen, float32(roadX1+2), 0, 9, screenHeight, concDark, false)
+	vector.FillRect(screen, float32(roadX1+2), 0, 7, screenHeight, conc, false)
+	vector.FillRect(screen, float32(roadX1+7), 0, 2, screenHeight, concHi, false)
+}
+
+// drawBridgeRow — ряд моста: деформационные швы на проезжей части,
+// столбики парапета, речная рябь и тёплые блики низкого солнца по воде.
+func (g *Game) drawBridgeRow(screen *ebiten.Image, y float64, h int) {
+	// шов поперёк дороги — изредка, бежит вместе с миром
+	if h%7 == 2 {
+		vector.FillRect(screen, float32(roadX0), float32(y+38), float32(roadX1-roadX0), 3,
+			color.RGBA{R: 66, G: 68, B: 76, A: 255}, false)
+	}
+
+	// столбики парапета — тёмные блоки на бетонных перилах
+	post := color.RGBA{R: 138, G: 140, B: 148, A: 255}
+	vector.FillRect(screen, float32(roadX0-11), float32(y+2), 7, 5, post, false)
+	vector.FillRect(screen, float32(roadX1+4), float32(y+2), 7, 5, post, false)
+
+	// рябь: короткие светлые штрихи по воде с обеих сторон
+	water := color.RGBA{R: 150, G: 196, B: 224, A: 60}
+	sun := color.RGBA{R: 255, G: 226, B: 176, A: 46}
+	for i := 0; i < 3; i++ {
+		r := hashIdx(h*7 + i*131)
+		var x, w float32
+		if r%2 == 0 {
+			x = float32(4 + r%22)
+			w = float32(14 + r%22)
+		} else {
+			x = float32(screenWidth - 20 - r%24)
+			w = float32(14 + r%20)
+		}
+		c := water
+		if r%9 == 3 {
+			c = sun // редкий тёплый блик — солнце только что взошло
+		}
+		vector.FillRect(screen, x, float32(y+float64(8+r%70)), w, 2, c, false)
+	}
+
+	// знак на парапете — изредка: белая табличка с красным ободом
+	if h%9 == 4 {
+		x := float32(roadX0 - 18)
+		if h%18 == 4 {
+			x = float32(roadX1 + 11)
+		}
+		vector.FillCircle(screen, x, float32(y+14), 7, color.RGBA{R: 226, G: 48, B: 48, A: 255}, false)
+		vector.FillCircle(screen, x, float32(y+14), 5, color.RGBA{R: 240, G: 240, B: 244, A: 255}, false)
 	}
 }
 

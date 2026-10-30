@@ -114,55 +114,58 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	drawText(screen, "◀", 60, nameY, 20, white)
 	drawText(screen, "▶", screenWidth-78, nameY, 20, white)
 
-	// ---------- выбор стартовой локации ----------
-	const cardW, cardH, gap = 72, 66, 7
+	// ---------- выбор стартовой локации: вертикальный список ----------
+	const cardW, cardH, gap = 210, 36, 8
 
-	totalW := len(stageDefs)*cardW + (len(stageDefs)-1)*gap
-	startX := (screenWidth - totalW) / 2
-	cardsY := nameY + 40
+	listH := len(stageDefs)*cardH + (len(stageDefs)-1)*gap
+	cardsY := nameY + 44
+	listX := screenWidth/2 - cardW/2 + 14 // сдвиг вправо — место под стрелки
 
 	for i, def := range stageDefs {
-		x := startX + i*(cardW+gap)
+		y := cardsY + i*(cardH+gap)
 		sel := i == g.startStage
 		border := color.RGBA{R: 90, G: 92, B: 105, A: 255}
 		if sel {
 			border = gold
 		}
-		vector.FillRect(screen, float32(x), float32(cardsY), cardW, cardH, border, false)
-		vector.FillRect(screen, float32(x+3), float32(cardsY+3), cardW-6, cardH-6, def.Grass, false)
-		vector.FillRect(screen, float32(x+12), float32(cardsY+3), cardW-24, cardH-6, def.Asphalt, false)
+		// плашка: рамка, фон-«природа», полоска дороги, название
+		vector.FillRect(screen, float32(listX), float32(y), cardW, cardH, border, false)
+		vector.FillRect(screen, float32(listX+3), float32(y+3), cardW-6, cardH-6, def.Grass, false)
+		vector.FillRect(screen, float32(listX+12), float32(y+3), 46, cardH-6, def.Asphalt, false)
 		if def.Night > 0.5 {
-			vector.FillRect(screen, float32(x+12), float32(cardsY+3), cardW-24, cardH-6,
+			vector.FillRect(screen, float32(listX+12), float32(y+3), 46, cardH-6,
 				color.RGBA{R: 6, G: 8, B: 24, A: 90}, false)
 		} else if def.Night > 0.2 {
-			vector.FillRect(screen, float32(x+12), float32(cardsY+3), cardW-24, cardH-6,
-				color.RGBA{R: 6, G: 8, B: 24, A: 45}, false) // лёгкий полумрак для DUSK/DAWN
+			vector.FillRect(screen, float32(listX+12), float32(y+3), 46, cardH-6,
+				color.RGBA{R: 6, G: 8, B: 24, A: 45}, false)
 		} else if def.Name == "HIGHWAY" {
-			vector.FillRect(screen, float32(x+12), float32(cardsY+3), 4, cardH-6,
+			vector.FillRect(screen, float32(listX+12), float32(y+3), 4, cardH-6,
 				color.RGBA{R: 165, G: 168, B: 175, A: 255}, false)
 		} else if def.Name == "DESERT" {
-			// кактус на карточке пустыни
 			cact := color.RGBA{R: 58, G: 104, B: 54, A: 255}
-			cx := float32(x + cardW/2)
-			vector.FillRect(screen, cx-2, float32(cardsY+cardH-22), 4, 14, cact, false)
-			vector.FillRect(screen, cx-8, float32(cardsY+cardH-18), 4, 7, cact, false)
-			vector.FillRect(screen, cx-8, float32(cardsY+cardH-13), 7, 3, cact, false)
-			vector.FillRect(screen, cx+4, float32(cardsY+cardH-20), 4, 7, cact, false)
-			vector.FillRect(screen, cx+2, float32(cardsY+cardH-15), 6, 3, cact, false)
+			cx := float32(listX + 28)
+			vector.FillRect(screen, cx-2, float32(y+cardH-14), 3, 9, cact, false)
+			vector.FillRect(screen, cx-6, float32(y+cardH-11), 3, 5, cact, false)
+			vector.FillRect(screen, cx+3, float32(y+cardH-12), 3, 5, cact, false)
+		} else if def.Name == "BRIDGE" {
+			conc := color.RGBA{R: 172, G: 174, B: 182, A: 255}
+			vector.FillRect(screen, float32(listX+14), float32(y+3), 3, cardH-6, conc, false)
+			vector.FillRect(screen, float32(listX+53), float32(y+3), 3, cardH-6, conc, false)
 		}
+
 		clr := color.RGBA{R: 200, G: 200, B: 210, A: 255}
 		if sel {
 			clr = gold
 		}
-		drawTextCenteredX(screen, def.Name, x+cardW/2, cardsY+cardH+8, 13, clr)
+		drawText(screen, def.Name, listX+68, y+8, 16, clr)
 	}
 
-	drawText(screen, "▲", 24, cardsY+cardH/2-26, 18, white)
-	drawText(screen, "▼", 24, cardsY+cardH/2+4, 18, white)
-	drawTextCentered(screen, "↑ ↓ — стартовая локация", cardsY+cardH+34, 15, white)
+	drawText(screen, "▲", listX-26, cardsY+listH/2-28, 18, white)
+	drawText(screen, "▼", listX-26, cardsY+listH/2+4, 18, white)
+	drawTextCentered(screen, "↑ ↓ — стартовая локация", cardsY+listH+12, 15, white)
 
 	// ---------- подсказки ----------
-	hintY := cardsY + cardH + 66
+	hintY := cardsY + listH + 44
 	drawTextCentered(screen, "ENTER — гонка", hintY, 17, color.RGBA{R: 120, G: 255, B: 120, A: 255})
 	drawTextCentered(screen, "TAB — сложность: "+diffNames[g.difficulty], hintY+30, 16, gold)
 	drawTextCentered(screen, "W/S — газ и тормоз, ← → — руль", hintY+54, 14, grey)

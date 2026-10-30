@@ -17,12 +17,13 @@ type StageDef struct {
 }
 
 var stageDefs = []StageDef{
-	{Name: "CITY", Grass: color.RGBA{R: 56, G: 118, B: 58, A: 255}, Asphalt: color.RGBA{R: 72, G: 74, B: 84, A: 255}, Mark: color.RGBA{R: 225, G: 225, B: 230, A: 255}, Night: 0, ScrollStart: 260, ScrollMax: 520, Duration: 24},
-	{Name: "DESERT", Grass: color.RGBA{R: 214, G: 190, B: 140, A: 255}, Asphalt: color.RGBA{R: 124, G: 112, B: 98, A: 255}, Mark: color.RGBA{R: 228, G: 214, B: 186, A: 255}, Night: 0, ScrollStart: 285, ScrollMax: 545, Duration: 20},
-	{Name: "HIGHWAY", Grass: color.RGBA{R: 110, G: 128, B: 86, A: 255}, Asphalt: color.RGBA{R: 76, G: 78, B: 88, A: 255}, Mark: color.RGBA{R: 225, G: 225, B: 230, A: 255}, Night: 0, ScrollStart: 310, ScrollMax: 580, Duration: 22},
-	{Name: "DUSK", Grass: color.RGBA{R: 62, G: 92, B: 64, A: 255}, Asphalt: color.RGBA{R: 62, G: 64, B: 82, A: 255}, Mark: color.RGBA{R: 205, G: 200, B: 190, A: 255}, Night: 0.4, ScrollStart: 290, ScrollMax: 550, Duration: 20},
-	{Name: "NIGHT", Grass: color.RGBA{R: 14, G: 16, B: 30, A: 255}, Asphalt: color.RGBA{R: 30, G: 32, B: 48, A: 255}, Mark: color.RGBA{R: 150, G: 150, B: 165, A: 255}, Night: 1, ScrollStart: 330, ScrollMax: 600, Duration: 20},
-	{Name: "DAWN", Grass: color.RGBA{R: 82, G: 108, B: 74, A: 255}, Asphalt: color.RGBA{R: 62, G: 64, B: 80, A: 255}, Mark: color.RGBA{R: 210, G: 205, B: 195, A: 255}, Night: 0.45, ScrollStart: 300, ScrollMax: 560, Duration: 20},
+	{Name: "CITY", Grass: color.RGBA{R: 56, G: 118, B: 58, A: 255}, Asphalt: color.RGBA{R: 72, G: 74, B: 84, A: 255}, Mark: color.RGBA{R: 225, G: 225, B: 230, A: 255}, Night: 0, ScrollStart: 270, ScrollMax: 520, Duration: 40},
+	{Name: "DESERT", Grass: color.RGBA{R: 214, G: 190, B: 140, A: 255}, Asphalt: color.RGBA{R: 124, G: 112, B: 98, A: 255}, Mark: color.RGBA{R: 228, G: 214, B: 186, A: 255}, Night: 0, ScrollStart: 285, ScrollMax: 545, Duration: 40},
+	{Name: "HIGHWAY", Grass: color.RGBA{R: 110, G: 128, B: 86, A: 255}, Asphalt: color.RGBA{R: 76, G: 78, B: 88, A: 255}, Mark: color.RGBA{R: 225, G: 225, B: 230, A: 255}, Night: 0.1, ScrollStart: 310, ScrollMax: 580, Duration: 40},
+	{Name: "DUSK", Grass: color.RGBA{R: 62, G: 92, B: 64, A: 255}, Asphalt: color.RGBA{R: 62, G: 64, B: 82, A: 255}, Mark: color.RGBA{R: 205, G: 200, B: 190, A: 255}, Night: 0.5, ScrollStart: 300, ScrollMax: 560, Duration: 40},
+	{Name: "NIGHT", Grass: color.RGBA{R: 14, G: 16, B: 30, A: 255}, Asphalt: color.RGBA{R: 30, G: 32, B: 48, A: 255}, Mark: color.RGBA{R: 150, G: 150, B: 165, A: 255}, Night: 1, ScrollStart: 330, ScrollMax: 600, Duration: 40},
+	{Name: "DAWN", Grass: color.RGBA{R: 82, G: 108, B: 74, A: 255}, Asphalt: color.RGBA{R: 62, G: 64, B: 80, A: 255}, Mark: color.RGBA{R: 210, G: 205, B: 195, A: 255}, Night: 0.5, ScrollStart: 300, ScrollMax: 560, Duration: 40},
+	{Name: "BRIDGE", Grass: color.RGBA{R: 40, G: 78, B: 104, A: 255}, Asphalt: color.RGBA{R: 96, G: 98, B: 108, A: 255}, Mark: color.RGBA{R: 238, G: 238, B: 242, A: 255}, Night: 0.1, ScrollStart: 290, ScrollMax: 540, Duration: 40},
 }
 
 // lerpColor — линейное смешение цветов, t от 0 (a) до 1 (b).
