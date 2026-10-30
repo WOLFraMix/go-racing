@@ -49,6 +49,7 @@ func (g *Game) updateMenu() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyM) {
 		g.muted = !g.muted
 		g.saveSettings()
+		g.audio.SetMusic(g.muted)
 	}
 
 	// выбор раскраски

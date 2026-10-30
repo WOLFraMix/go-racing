@@ -528,6 +528,7 @@ func (g *Game) updatePlaying() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyM) {
 		g.muted = !g.muted
 		g.saveSettings()
+		g.audio.SetMusic(g.muted)
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		// сирена — только у машин с маячками на крыше (ПАТРИОТ)

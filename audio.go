@@ -17,6 +17,7 @@ type AudioSys struct {
 	engine []*audio.Player // 6 слоёв «двигателя» разной высоты тона
 
 	crashBuf []byte
+	musicBuf []byte
 
 	lastGear   int
 	shiftTimer float64
@@ -27,6 +28,8 @@ type AudioSys struct {
 	hornBuf []byte
 
 	siren *audio.Player
+
+	music *audio.Player
 }
 
 func NewAudio() *AudioSys {
@@ -50,9 +53,29 @@ func NewAudio() *AudioSys {
 		sp.SetVolume(0)
 		sp.Play()
 		a.siren = sp
+		a.musicBuf = genMusic(sampleRate)
+		buf := a.musicBuf
+		loop := audio.NewInfiniteLoop(bytes.NewReader(buf), int64(len(buf)))
+		if mp, err := a.ctx.NewPlayer(loop); err == nil {
+			mp.SetVolume(0.25)
+			mp.Play()
+			a.music = mp
+		}
 		a.hornBuf = genHorn(sampleRate)
 	}
 	return a
+}
+
+// SetMusic — фоновая музыка играет всегда, mute только глушит её.
+func (a *AudioSys) SetMusic(muted bool) {
+	if a.music == nil {
+		return
+	}
+	if muted {
+		a.music.SetVolume(0)
+	} else {
+		a.music.SetVolume(0.25)
+	}
 }
 
 // SetSiren — сирена играется, только если включена и не замьючена.
@@ -182,6 +205,125 @@ func toPCM(samples []float64) []byte {
 		buf[i*4+3] = byte(v >> 8)
 	}
 	return buf
+}
+
+// genMusic — лёгкий synthwave-луп, всё синтезировано с нуля.
+// Прогрессия Am–F–C–G: пэд из мягких синусов, восьмые баса,
+// арпеджио шестнадцатыми с эхом и деликатная перкуссия.
+// Все тона квантованы на целое число периодов на длину лупа —
+// стык бесшовный, как у engine-лупов.
+func genMusic(sr int) []byte {
+	const bpm = 100.0
+	beat := 60.0 / bpm // 0.6 с
+	bar := 4 * beat    // 2.4 с — один аккорд
+	dur := 4 * bar     // 9.6 с — весь луп
+	n := int(dur * float64(sr))
+	s := make([]float64, n)
+
+	// квантование частоты: периодов на луп должно быть целое число
+	qfreq := func(f float64) float64 { return math.Round(f*dur) / dur }
+	note := func(midi float64) float64 {
+		return qfreq(440 * math.Pow(2, (midi-69)/12))
+	}
+
+	chords := [][]float64{
+		{57, 60, 64}, // Am: A3 C4 E4
+		{53, 57, 60}, // F:  F3 A3 C4
+		{48, 52, 55}, // C:  C3 E3 G3
+		{55, 59, 62}, // G:  G3 B3 D4
+	}
+	bassRoot := []float64{33, 29, 24, 31} // A1 F1 C1 G1
+	arpOrder := [4]int{0, 1, 2, 1}        // фигурация арпеджио
+
+	padPh := [3]float64{}
+	padPh2 := [3]float64{}
+	var bassPh, kickPh float64
+	var prevW float64
+
+	for i := 0; i < n; i++ {
+		t := float64(i) / float64(sr)
+		ci := int(t/bar) % 4
+		bi := int(t / beat)        // номер доли
+		bt := math.Mod(t, beat)    // время внутри доли
+		chordT := math.Mod(t, bar) // время внутри аккорда
+
+		v := 0.0
+
+		// пэд: два слегка расстроенных синуса на ноту, перекрёстное затухание
+		pEnv := math.Min(1, chordT/0.4) * math.Min(1, (bar-chordT)/0.4) * 0.10
+		for ni, m := range chords[ci] {
+			f := note(m)
+			p := padPh[ni]
+			padPh[ni] += 2 * math.Pi * f / float64(sr)
+			p2 := padPh2[ni]
+			padPh2[ni] += 2 * math.Pi * qfreq(f*1.004) / float64(sr)
+			v += pEnv * (math.Sin(p) + 0.6*math.Sin(p2))
+		}
+
+		// бас: восьмые с драйвовым паттерном «1 … 4» внутри доли
+		ei := int(t / (beat / 2)) // номер восьмой
+		if ei%4 == 0 || ei%4 == 3 {
+			slotT := math.Mod(t, beat/2)
+			bl := beat / 2 * 0.8
+			bg := clamp01(slotT/0.005) * clamp01((bl-slotT)/0.05)
+			f := note(bassRoot[ci])
+			p := bassPh
+			bassPh += 2 * math.Pi * f / float64(sr)
+			v += 0.15 * bg * (math.Sin(p) + 0.3*math.Sin(2*p))
+		}
+
+		// арпеджио: шестнадцатые, октава прыгает каждый такт фигурации
+		asi := int(t / (beat / 4)) // номер шестнадцатой
+		slotT := math.Mod(t, beat/4)
+		aEnv := clamp01(slotT/0.004) * clamp01(((beat/4)*0.85-slotT)/0.04)
+		m := chords[ci][arpOrder[asi%4]] + 12
+		if (asi/4)%2 == 1 {
+			m += 12
+		}
+		fa := 440 * math.Pow(2, (m-69)/12)
+		var phA float64
+		for k := 0; k < asi%4+1; k++ { // фаза от начала ноты
+			phA += 2 * math.Pi * fa / float64(sr)
+		}
+		v += 0.065 * aEnv * (math.Sin(phA) + 0.15*math.Sin(2*phA))
+		_ = phA
+
+		// бочка на каждую долю: синус со скольжением высоты вниз
+		if bt < 0.2 {
+			env := math.Exp(-bt / 0.05)
+			fk := 80.0 - 175.0*bt
+			p := kickPh
+			kickPh += 2 * math.Pi * fk / float64(sr)
+			v += 0.28 * env * math.Sin(p)
+		}
+		// снейр на 2-ю и 4-ю доли: шум + короткий тон
+		if bi%2 == 1 && bt < 0.16 {
+			env := math.Exp(-bt / 0.045)
+			w := rand.Float64()*2 - 1
+			v += 0.10 * env * (0.7*w + 0.4*math.Sin(2*math.Pi*190*t))
+		}
+		// хэты на восьмые: «осветлённый» шум (разность соседних сэмплов)
+		ht := math.Mod(t, beat/2)
+		if ht < 0.035 {
+			env := math.Exp(-ht / 0.012)
+			w := rand.Float64()*2 - 1
+			bright := w - prevW*0.8
+			prevW = w
+			v += 0.05 * env * bright
+		}
+
+		s[i] = v * 0.5
+	}
+
+	// лёгкое эхо на всё: копия с задержкой 3/8 доли, завёрнутая по кругу —
+	// за счёт этого стык лупа остаётся бесшовным и у хвоста эха
+	d := int(float64(sr) * beat * 0.375)
+	orig := make([]float64, n)
+	copy(orig, s)
+	for i := 0; i < n; i++ {
+		s[i] += 0.22 * orig[(i-d+n)%n]
+	}
+	return toPCM(s)
 }
 
 // genHorn — один длинный «БИИИИИП»: чистый тон с мягким подъёмом
