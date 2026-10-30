@@ -70,10 +70,22 @@ func drawBrakeLights(dst *ebiten.Image, c Car, braking bool) {
 	dim := color.RGBA{R: 100, G: 10, B: 10, A: 255}
 	hot := color.RGBA{R: 255, G: 30, B: 30, A: 255}
 
-	w, h := 9.0, 7.0
-	y := c.Y + c.H - h - 2
-	lx := c.X + 2
-	rx := c.X + c.W - w - 2
+	var w, h, y, lx, rx float64
+	if c.Kind == KindPlayer {
+		// игрок: блоки по зонам стоп-сигналов спрайта —
+		// ближе к середине и чуть выше, как договорились
+		sx, sy := c.W/106.0, c.H/152.0
+		w, h = 16*sx, 10*sy
+		y = c.Y + 129*sy
+		lx = c.X + 13*sx
+		rx = c.X + 77*sx
+	} else {
+		// враги: прежние позиции — под нарисованные на спрайтах фонари
+		w, h = 9.0, 7.0
+		y = c.Y + c.H - h - 2
+		lx = c.X + 2
+		rx = c.X + c.W - w - 2
+	}
 
 	lf, rf := float32(lx), float32(rx)
 	yy, ww, hh := float32(y), float32(w), float32(h)
@@ -163,14 +175,24 @@ func drawHeadlights(dst *ebiten.Image, c Car, k float32) {
 // drawTailLights — ночные габариты. Без торможения — тусклый огонь,
 // при торможении — яркие стоп-сигналы.
 func drawTailLights(dst *ebiten.Image, c Car, braking bool) {
-	base := color.RGBA{R: 200, G: 40, B: 30, A: 110} // тусклый габарит
-	stop := color.RGBA{R: 255, G: 60, B: 40, A: 235} // стоп-сигнал
-	halo := color.RGBA{R: 255, G: 50, B: 40, A: 70}  // свечение вокруг
+	base := color.RGBA{R: 200, G: 40, B: 30, A: 110}
+	stop := color.RGBA{R: 255, G: 60, B: 40, A: 235}
+	halo := color.RGBA{R: 255, G: 50, B: 40, A: 70}
 
-	for _, lx := range []float64{c.X + c.W*0.16, c.X + c.W*0.84} {
-		cy := c.Y + c.H - 6
+	var lxList []float64
+	var cy float64
+	if c.Kind == KindPlayer {
+		// игрок: центры зон стоп-сигналов спрайта (X 21 и 85 из 106, Y 134 из 152)
+		lxList = []float64{c.X + c.W*21/106.0, c.X + c.W*85/106.0}
+		cy = c.Y + 134*(c.H/152.0)
+	} else {
+		// враги: прежние позиции
+		lxList = []float64{c.X + c.W*0.16, c.X + c.W*0.84}
+		cy = c.Y + c.H - 6
+	}
+
+	for _, lx := range lxList {
 		if braking {
-			// ореол свечения при торможении
 			vector.FillCircle(dst, float32(lx), float32(cy), 9, halo, false)
 			vector.FillCircle(dst, float32(lx), float32(cy), 5, stop, false)
 		} else {
