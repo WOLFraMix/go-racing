@@ -628,7 +628,7 @@ func (g *Game) updatePlaying() {
 			}
 		}
 
-		if hit(g.player, *e) {
+		if hitRect(g.player, *e) {
 			g.crash()
 			return
 		}

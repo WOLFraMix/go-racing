@@ -167,14 +167,6 @@ func xOverlap(a, b Car) bool {
 	return a.X+m < b.X+b.W-m && a.X+a.W-m > b.X+m
 }
 
-func hit(a, b Car) bool {
-	const m = 5.0
-	return a.X+m < b.X+b.W-m &&
-		a.X+a.W-m > b.X+m &&
-		a.Y+m < b.Y+b.H-m &&
-		a.Y+a.H-m > b.Y+m
-}
-
 func (g *Game) laneFreeFor(e Car, selfIdx, lane int) bool {
 	if lane < 0 || lane >= laneCount {
 		return false
@@ -399,6 +391,14 @@ func (g *Game) updateEnemies(eff, dt float64) {
 			}
 		}
 	}
+}
+
+func hitRect(a, b Car) bool {
+	const m = 2.0
+	ax, ay, aw, ah := a.HitRect()
+	bx, by, bw, bh := b.HitRect()
+	return ax+m < bx+bw-m && ax+aw-m > bx+m &&
+		ay+m < by+bh-m && ay+ah-m > by+m
 }
 
 // HitRect — единственный источник правды о прямоугольнике машины.
