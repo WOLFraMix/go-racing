@@ -394,10 +394,13 @@ func (g *Game) repairWall() bool {
 	if len(cands) == 0 {
 		return false
 	}
+
 	e := cands[rand.Intn(len(cands))]
 
-	// 1) форс-перестроение в физически свободную соседнюю полосу
-	if e.TargetLane == e.Lane {
+	// 1) форс-перестроение — только если сейчас никто не маневрирует.
+	// Иначе затор раскрываем ускорением: аварийный путь не имеет права
+	// плодить одновременные манёвры, как и обычный ИИ
+	if !g.changeBusy() && e.TargetLane == e.Lane {
 		for _, nl := range [2]int{e.Lane - 1, e.Lane + 1} {
 			if nl >= 0 && nl < laneCount && g.laneFreeFor(*e, -1, nl) {
 				e.TargetLane = nl
@@ -407,6 +410,7 @@ func (g *Game) repairWall() bool {
 			}
 		}
 	}
+
 	// 2) ускорение: машина уезжает вперёд, щель открывается
 	fast := 2.4 + rand.Float64()*0.5
 	if e.BaseOwn < fast {
