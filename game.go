@@ -521,8 +521,11 @@ func (g *Game) updatePlaying() {
 		g.saveSettings()
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		g.sirenOn = !g.sirenOn
-		g.audio.SetSiren(g.sirenOn, g.muted)
+		// сирена — только у машин с маячками на крыше (ПАТРИОТ)
+		if beaconSkins[g.skinNames[g.skinIdx]] {
+			g.sirenOn = !g.sirenOn
+			g.audio.SetSiren(g.sirenOn, g.muted)
+		}
 	}
 
 	// руль: поворотник в «кадрах», как у врагов
@@ -579,9 +582,8 @@ func (g *Game) updatePlaying() {
 
 	def = g.currentDef()
 
-	// страховочный фильтр: дорога всегда перетекает медленно,
-	// даже если выше по цепочке где-то ступенька
-	k := math.Min(1, 2.0*dt)
+	// переход этапов
+	k := math.Min(1, 0.7*dt)
 
 	g.smGrass = lerpColor(g.smGrass, def.Grass, k)
 	g.smAsphalt = lerpColor(g.smAsphalt, def.Asphalt, k)
@@ -591,6 +593,14 @@ func (g *Game) updatePlaying() {
 	// плавный разгон внутри этапа
 	prog := math.Min(1, g.stageTime/def.Duration)
 	target := def.ScrollStart + (def.ScrollMax-def.ScrollStart)*prog
+
+	// стык этапов: первые 3 секунды подмешиваем конечную скорость
+	// предыдущего этапа — торможение/разгон размазывается, ступеньки нет
+	if g.stageTime < 3.0 {
+		prev := stageDefs[(g.stageIdx+len(stageDefs)-1)%len(stageDefs)]
+		bt := g.stageTime / 3.0
+		target = prev.ScrollMax + (target-prev.ScrollMax)*bt
+	}
 	g.scrollSpeed += (target - g.scrollSpeed) * math.Min(1, 2*dt)
 	eff := g.scrollSpeed * (1 + 0.35*g.boost)
 	if g.playerBraking {

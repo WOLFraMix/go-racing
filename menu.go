@@ -61,6 +61,12 @@ func (g *Game) updateMenu() error {
 		g.saveSettings()
 	}
 
+	// сирена осталась только у скинов с маячками
+	if !beaconSkins[g.skinNames[g.skinIdx]] && g.sirenOn {
+		g.sirenOn = false
+		g.audio.SetSiren(false, g.muted)
+	}
+
 	// выбор сложности
 	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
 		g.difficulty = (g.difficulty + 1) % len(diffMult)
