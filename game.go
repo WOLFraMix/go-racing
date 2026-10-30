@@ -159,13 +159,14 @@ func NewGame() *Game {
 		state: StateMenu,
 		audio: NewAudio(),
 		sprites: map[CarKind]Sprite{
-			KindSedan:     loadSprite("assets/car_sedan.png", color.RGBA{R: 170, G: 60, B: 55, A: 255}),
-			KindSport:     loadSprite("assets/car_sport.png", color.RGBA{R: 220, G: 170, B: 40, A: 255}),
-			KindSUV:       loadSprite("assets/car_suv.png", color.RGBA{R: 55, G: 120, B: 75, A: 255}),
-			KindBus:       loadSprite("assets/bus.png", color.RGBA{R: 235, G: 185, B: 40, A: 255}),
-			KindMinibus:   loadSprite("assets/minibus.png", color.RGBA{R: 220, G: 225, B: 230, A: 255}),
-			KindTruck:     loadSprite("assets/truck.png", color.RGBA{R: 130, G: 135, B: 145, A: 255}),
-			KindAmbulance: loadSprite("assets/ambulance.png", color.RGBA{R: 240, G: 244, B: 248, A: 255}),
+			KindSedan:       loadSprite("assets/car_sedan.png", color.RGBA{R: 170, G: 60, B: 55, A: 255}),
+			KindSport:       loadSprite("assets/car_sport.png", color.RGBA{R: 220, G: 170, B: 40, A: 255}),
+			KindSUV:         loadSprite("assets/car_suv.png", color.RGBA{R: 55, G: 120, B: 75, A: 255}),
+			KindBus:         loadSprite("assets/bus.png", color.RGBA{R: 235, G: 185, B: 40, A: 255}),
+			KindMinibus:     loadSprite("assets/minibus.png", color.RGBA{R: 220, G: 225, B: 230, A: 255}),
+			KindTruck:       loadSprite("assets/truck.png", color.RGBA{R: 130, G: 135, B: 145, A: 255}),
+			KindAmbulance:   loadSprite("assets/ambulance.png", color.RGBA{R: 240, G: 244, B: 248, A: 255}),
+			KindPoliceSedan: loadSprite("assets/police_sedan.png", color.RGBA{R: 40, G: 80, B: 170, A: 255}),
 		},
 	}
 	for _, m := range skinMeta {
@@ -183,6 +184,8 @@ func NewGame() *Game {
 		KindTruck:     loadSkinPack("assets/skins/truck", g.sprites[KindTruck]),
 		KindAmbulance: loadSkinPack("assets/skins/ambulance", g.sprites[KindAmbulance]),
 	}
+	// полицейский седан — единственный скин, без пака вариантов
+	g.enemyVariants[KindPoliceSedan] = []Sprite{g.sprites[KindPoliceSedan]}
 
 	g.readSettings()
 	g.readHighScore()
@@ -721,6 +724,16 @@ func (g *Game) topmostYInLane(l int) float64 {
 	return best
 }
 
+// hasKind — есть ли на экране хотя бы одна машина этого типа.
+func (g *Game) hasKind(k CarKind) bool {
+	for i := range g.enemies {
+		if g.enemies[i].Kind == k {
+			return true
+		}
+	}
+	return false
+}
+
 // spawnEnemy — спавн в любую полосу, где есть зазор за плетнем,
 // но только если маршрут проезда и зона комфорта сохраняются
 // (spawnSafe). Полосы выбираются в случайном порядке — «вечных
@@ -737,6 +750,9 @@ func (g *Game) spawnEnemy() bool {
 
 	for _, l := range cand {
 		e := RandomEnemy(l)
+		if e.Kind == KindPoliceSedan && g.hasKind(KindPoliceSedan) {
+			continue
+		}
 		e.Y -= rand.Float64() * spawnStagger
 		if !g.antiRow(e) {
 			continue // не сеем строки: рядом по высоте уже кто-то стоит
@@ -799,6 +815,9 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 		drawCar(screen, e, skin.Img)
 		drawBlinker(screen, e, e.Blink, int(g.frame))
 		drawBrakeLights(screen, e, e.Braking)
+		if e.Kind == KindPoliceSedan {
+			drawBeacons(screen, e, int(g.frame))
+		}
 	}
 	ps := g.playerSkins[g.skinIdx]
 	drawCar(screen, playerDraw, ps.Img)
@@ -863,12 +882,21 @@ var beaconSkins = map[string]bool{
 	"PATRIOT POLICE": true,
 }
 
+// beaconRect — прямоугольник балки маячков в мировых координатах.
+// У скинов разные балки, координаты — в единицах спрайта 106×152.
+func beaconRect(c Car) (bx, by, bw, bh float64) {
+	sx, sy := c.W/106.0, c.H/152.0
+	if c.Kind == KindPoliceSedan {
+		return c.X + 30*sx, c.Y + 64*sy, 46 * sx, 16 * sy
+	}
+	return c.X + 24*sx, c.Y + 64*sy, 58 * sx, 16 * sy
+}
+
 // drawBeacons — мигание маячков поверх спрайта + свечение вокруг.
 // Координаты балки с спрайта переводятся в рект машины пропорционально.
 func drawBeacons(screen *ebiten.Image, c Car, frame int) {
 	sx, sy := c.W/106.0, c.H/152.0
-	bx, by := c.X+24*sx, c.Y+64*sy
-	bw, bh := 58*sx, 16*sy
+	bx, by, bw, bh := beaconRect(c)
 
 	ph := (frame / 12) % 2 // такт мигания: ~0.2 с на фазу
 	redA, blueA := uint8(50), uint8(50)

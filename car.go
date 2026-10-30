@@ -37,6 +37,7 @@ const (
 	KindBus
 	KindAmbulance
 	KindTruck
+	KindPoliceSedan
 )
 
 type Car struct {
@@ -111,7 +112,11 @@ func RandomEnemy(lane int) Car {
 
 	switch r := rand.Float64(); {
 	case r < 0.02:
-		kind = KindAmbulance // редкая гостья — 2%
+		kind = KindPoliceSedan // редкий погонял: быстрее спорткара
+		points = 3
+		base = 2.4 + rand.Float64()*0.7
+	case r < 0.04:
+		kind = KindAmbulance
 		points = 4
 		base = 1.9 + rand.Float64()*0.5
 	case r < 0.14:
