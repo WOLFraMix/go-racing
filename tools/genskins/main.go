@@ -161,13 +161,6 @@ func main() {
 			fmt.Println("OK", path)
 		}
 	}
-
-	if err := os.MkdirAll("assets/skins/ambulance", 0o755); err != nil {
-		panic(err)
-	}
-	data, _ := os.ReadFile("assets/ambulance.png")
-	os.WriteFile("assets/skins/ambulance/ambulance.png", data, 0o644)
-	fmt.Println("OK assets/skins/ambulance/ambulance.png")
 }
 
 func repaint(src image.Image, target color.RGBA, repaintLight, fixBumpers bool, headMask, tailMask []bool) *image.RGBA {

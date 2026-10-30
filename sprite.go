@@ -71,20 +71,29 @@ func drawBrakeLights(dst *ebiten.Image, c Car, braking bool) {
 	hot := color.RGBA{R: 255, G: 30, B: 30, A: 255}
 
 	var w, h, y, lx, rx float64
-	if c.Kind == KindPlayer {
+	switch c.Kind {
+	case KindPlayer:
 		// игрок: блоки по зонам стоп-сигналов спрайта —
-		// ближе к середине и чуть выше, как договорились
+		// ближе к середине и чуть выше
 		sx, sy := c.W/106.0, c.H/152.0
 		w, h = 16*sx, 10*sy
 		y = c.Y + 129*sy
 		lx = c.X + 13*sx
 		rx = c.X + 77*sx
-	} else {
-		// враги: прежние позиции — под нарисованные на спрайтах фонари
+	case KindPoliceSedan:
+		// полицейский седан: свои зоны стоп-сигналов спрайта
+		// (X 18–34 и 72–88, Y 133–141)
+		sx, sy := c.W/106.0, c.H/152.0
+		w, h = 16*sx, 8*sy
+		y = c.Y + 133*sy
+		lx = c.X + 18*sx
+		rx = c.X + 72*sx
+	default:
+		// остальной трафик: прежние позиции, сдвинуты на 2 px к центру
 		w, h = 9.0, 7.0
 		y = c.Y + c.H - h - 2
-		lx = c.X + 2
-		rx = c.X + c.W - w - 2
+		lx = c.X + 4.0
+		rx = c.X + c.W - w - 4.0
 	}
 
 	lf, rf := float32(lx), float32(rx)
@@ -179,19 +188,26 @@ func drawTailLights(dst *ebiten.Image, c Car, braking bool) {
 	stop := color.RGBA{R: 255, G: 60, B: 40, A: 235}
 	halo := color.RGBA{R: 255, G: 50, B: 40, A: 70}
 
-	var lxList []float64
-	var cy float64
-	if c.Kind == KindPlayer {
-		// игрок: центры зон стоп-сигналов спрайта (X 21 и 85 из 106, Y 134 из 152)
-		lxList = []float64{c.X + c.W*21/106.0, c.X + c.W*85/106.0}
+	var cxL, cxR, cy float64
+	switch c.Kind {
+	case KindPlayer:
+		// центры зон стоп-сигналов игрока: X 21 и 85 из 106, Y 134 из 152
+		cxL = c.X + c.W*21/106.0
+		cxR = c.X + c.W*85/106.0
 		cy = c.Y + 134*(c.H/152.0)
-	} else {
-		// враги: прежние позиции
-		lxList = []float64{c.X + c.W*0.16, c.X + c.W*0.84}
+	case KindPoliceSedan:
+		// центры зон седана: X 26 и 80 из 106, Y 137 из 152
+		cxL = c.X + c.W*26/106.0
+		cxR = c.X + c.W*80/106.0
+		cy = c.Y + 137*(c.H/152.0)
+	default:
+		// остальной трафик: центры дневных блоков, сдвинуты на 2 px к центру
+		cxL = c.X + 8.5
+		cxR = c.X + c.W - 8.5
 		cy = c.Y + c.H - 6
 	}
 
-	for _, lx := range lxList {
+	for _, lx := range []float64{cxL, cxR} {
 		if braking {
 			vector.FillCircle(dst, float32(lx), float32(cy), 9, halo, false)
 			vector.FillCircle(dst, float32(lx), float32(cy), 5, stop, false)

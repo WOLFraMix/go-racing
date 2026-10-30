@@ -176,15 +176,15 @@ func NewGame() *Game {
 
 	// паки скинов врагов — обычные файлы в assets/skins/<тип>/
 	g.enemyVariants = map[CarKind][]Sprite{
-		KindSedan:     loadSkinPack("assets/skins/sedan", g.sprites[KindSedan]),
-		KindSport:     loadSkinPack("assets/skins/sport", g.sprites[KindSport]),
-		KindSUV:       loadSkinPack("assets/skins/suv", g.sprites[KindSUV]),
-		KindMinibus:   loadSkinPack("assets/skins/minibus", g.sprites[KindMinibus]),
-		KindBus:       loadSkinPack("assets/skins/bus", g.sprites[KindBus]),
-		KindTruck:     loadSkinPack("assets/skins/truck", g.sprites[KindTruck]),
-		KindAmbulance: loadSkinPack("assets/skins/ambulance", g.sprites[KindAmbulance]),
+		KindSedan:   loadSkinPack("assets/skins/sedan", g.sprites[KindSedan]),
+		KindSport:   loadSkinPack("assets/skins/sport", g.sprites[KindSport]),
+		KindSUV:     loadSkinPack("assets/skins/suv", g.sprites[KindSUV]),
+		KindMinibus: loadSkinPack("assets/skins/minibus", g.sprites[KindMinibus]),
+		KindBus:     loadSkinPack("assets/skins/bus", g.sprites[KindBus]),
+		KindTruck:   loadSkinPack("assets/skins/truck", g.sprites[KindTruck]),
 	}
-	// полицейский седан — единственный скин, без пака вариантов
+	// скорая и полицейский седан — единственные скины, без паков вариантов
+	g.enemyVariants[KindAmbulance] = []Sprite{g.sprites[KindAmbulance]}
 	g.enemyVariants[KindPoliceSedan] = []Sprite{g.sprites[KindPoliceSedan]}
 
 	g.readSettings()
@@ -815,7 +815,7 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 		drawCar(screen, e, skin.Img)
 		drawBlinker(screen, e, e.Blink, int(g.frame))
 		drawBrakeLights(screen, e, e.Braking)
-		if e.Kind == KindPoliceSedan {
+		if e.Kind == KindPoliceSedan || e.Kind == KindAmbulance {
 			drawBeacons(screen, e, int(g.frame))
 		}
 	}
@@ -886,7 +886,7 @@ var beaconSkins = map[string]bool{
 // У скинов разные балки, координаты — в единицах спрайта 106×152.
 func beaconRect(c Car) (bx, by, bw, bh float64) {
 	sx, sy := c.W/106.0, c.H/152.0
-	if c.Kind == KindPoliceSedan {
+	if c.Kind == KindPoliceSedan || c.Kind == KindAmbulance {
 		return c.X + 30*sx, c.Y + 64*sy, 46 * sx, 16 * sy
 	}
 	return c.X + 24*sx, c.Y + 64*sy, 58 * sx, 16 * sy
