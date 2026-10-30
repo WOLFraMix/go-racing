@@ -24,6 +24,8 @@ type AudioSys struct {
 	rel, load float64 // сглаженные «обороты» и нагрузка
 	time      float64
 
+	hornBuf []byte
+
 	siren *audio.Player
 }
 
@@ -48,6 +50,7 @@ func NewAudio() *AudioSys {
 		sp.SetVolume(0)
 		sp.Play()
 		a.siren = sp
+		a.hornBuf = genHorn(sampleRate)
 	}
 	return a
 }
@@ -135,6 +138,20 @@ func (a *AudioSys) SilenceEngine() {
 	}
 }
 
+// PlayHorn — двойное «би-би»: два тона ~370 Гц по 0.12 с с паузой.
+// Одноразовый буфер, как у crash; отдельный плеер на каждое нажатие.
+func (a *AudioSys) PlayHorn(muted bool) {
+	if muted {
+		return
+	}
+	p, err := a.ctx.NewPlayer(bytes.NewReader(a.hornBuf))
+	if err != nil {
+		return
+	}
+	p.SetVolume(0.06)
+	p.Play()
+}
+
 func (a *AudioSys) PlayCrash(vol float64, muted bool) {
 	if muted {
 		return
@@ -165,6 +182,35 @@ func toPCM(samples []float64) []byte {
 		buf[i*4+3] = byte(v >> 8)
 	}
 	return buf
+}
+
+// genHorn — один длинный «БИИИИИП»: чистый тон с мягким подъёмом
+// и спадом. Один тон, а не аккорд — аккорд двух близких частот
+// даёт биения и дребезжит, нам нужен ровный сигнал.
+func genHorn(sr int) []byte {
+	const (
+		f       = 440.0 // тон гудка, Гц
+		beep    = 0.45  // длина сигнала, с
+		attack  = 0.05  // мягкий подъём, с
+		release = 0.10  // мягкий спад, с
+	)
+	n := int(float64(sr) * beep)
+	s := make([]float64, n)
+	ph := 0.0
+	w := 2 * math.Pi * f / float64(sr)
+	for i := 0; i < n; i++ {
+		t := float64(i) / float64(sr)
+		ph += w
+
+		// плавный вход и выход — никакого щелчка на краях
+		env := clamp01(t/attack) * clamp01((beep-t)/release)
+
+		// почти чистый тон, лишь капля второй гармоники для тела
+		v := math.Sin(ph) + 0.08*math.Sin(2*ph)
+		v = math.Tanh(0.8 * v)
+		s[i] = v * env * 0.42
+	}
+	return toPCM(s)
 }
 
 // genEngineLoop — ровно целое число периодов на буфер → бесшовный луп.

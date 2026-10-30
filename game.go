@@ -114,6 +114,8 @@ type Game struct {
 
 	sirenOn bool // проблесковые маячки (только полицейский скин)
 
+	hornCd float64 // кулдаун гудка, в кадрах
+
 	muted      bool
 	skinIdx    int
 	startStage int
@@ -525,7 +527,16 @@ func (g *Game) updatePlaying() {
 		if beaconSkins[g.skinNames[g.skinIdx]] {
 			g.sirenOn = !g.sirenOn
 			g.audio.SetSiren(g.sirenOn, g.muted)
+		} else {
+			// все остальные — короткий гудок с кулдауном
+			if g.hornCd <= 0 {
+				g.audio.PlayHorn(g.muted)
+				g.hornCd = 30 // не чаще двух раз в секунду
+			}
 		}
+	}
+	if g.hornCd > 0 {
+		g.hornCd -= 60 * dt
 	}
 
 	// руль: поворотник в «кадрах», как у врагов
