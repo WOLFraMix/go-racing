@@ -24,6 +24,7 @@ var skinMeta = []skinDef{
 	{"player_orange.png", color.RGBA{R: 240, G: 120, B: 35, A: 255}, "SUNSET"},
 	{"player_purple.png", color.RGBA{R: 150, G: 62, B: 196, A: 255}, "VIOLET GT"},
 	{"player_police.png", color.RGBA{R: 235, G: 238, B: 244, A: 255}, "PATRIOT POLICE"},
+	{"player_cyan.png", color.RGBA{R: 28, G: 176, B: 198, A: 255}, "CYAN GT"},
 }
 
 // drawTextCenteredX — центрирование по произвольной точке, с тенью.
