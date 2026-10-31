@@ -121,7 +121,8 @@ type Game struct {
 	startStage int
 	difficulty int // 0 — easy, 1 — medium, 2 — hard
 
-	audio *AudioSys
+	signals *TurnSignals
+	audio   *AudioSys
 
 	sprites     map[CarKind]Sprite
 	playerSkins []Sprite
@@ -193,6 +194,7 @@ func NewGame() *Game {
 	g.enemyVariants[KindAmbulance] = []Sprite{g.sprites[KindAmbulance]}
 	g.enemyVariants[KindPoliceSedan] = []Sprite{g.sprites[KindPoliceSedan]}
 
+	g.signals = NewTurnSignals(float32(carW) / 106.0)
 	g.readSettings()
 	g.readHighScore()
 	if g.difficulty < 0 || g.difficulty >= len(diffMult) {
@@ -251,6 +253,7 @@ func (g *Game) Update() error {
 	switch g.state {
 	case StateMenu:
 		g.audio.SilenceEngine() // в меню мотор молчит
+		g.signals.Reset()
 		g.audio.SetSiren(false, g.muted)
 		return g.updateMenu()
 	case StatePlaying:
@@ -546,6 +549,8 @@ func (g *Game) updatePlaying() {
 	if g.hornCd > 0 {
 		g.hornCd -= 60 * dt
 	}
+	g.signals.Muted = g.muted
+	g.signals.Update()
 
 	// руль: поворотник в «кадрах», как у врагов
 	const steer = 340.0
@@ -725,6 +730,7 @@ func (g *Game) updatePlaying() {
 
 func (g *Game) crash() {
 	g.audio.PlayCrash(0.5, g.muted)
+	g.signals.Reset() // поворотники гаснут вместе с машиной
 	cx, cy := g.player.X+g.player.W/2, g.player.Y+g.player.H/2
 	for i := 0; i < 46; i++ {
 		ang := rand.Float64() * 2 * math.Pi
@@ -893,6 +899,15 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 		}
 		drawTailLights(screen, playerDraw, g.playerBraking)
 	}
+
+	if dark > 0.001 {
+		for _, e := range g.enemies {
+			drawTailLights(screen, e, e.Braking)
+		}
+		drawTailLights(screen, playerDraw, g.playerBraking)
+	}
+
+	g.signals.Draw(screen, float32(g.player.X), float32(g.player.Y)) // ← новая строка
 
 	for _, p := range g.sparks {
 		c := p.Clr
