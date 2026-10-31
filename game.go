@@ -250,6 +250,14 @@ func (g *Game) curScore() int {
 // ---------- Update: диспетчер состояний ----------
 
 func (g *Game) Update() error {
+	for i, key := range []ebiten.Key{
+		ebiten.KeyDigit1, ebiten.KeyDigit2, ebiten.KeyDigit3,
+		ebiten.KeyDigit4, ebiten.KeyDigit5,
+	} {
+		if inpututil.IsKeyJustPressed(key) {
+			g.audio.SetTrack(i, g.muted)
+		}
+	}
 	switch g.state {
 	case StateMenu:
 		g.audio.SilenceEngine() // в меню мотор молчит
@@ -935,6 +943,7 @@ func (g *Game) drawHUD(screen *ebiten.Image) {
 	drawTextCentered(screen, def.Name, 14, 18, grey)
 	if g.muted {
 		drawTextCentered(screen, "MUTED (M)", 42, 16, grey)
+		drawTextCentered(screen, "♫ "+trackNames[g.audio.Track()]+" [1-5]", 62, 14, grey)
 	}
 
 	// шкала турбо: справа напротив скорости; полная — перегрев

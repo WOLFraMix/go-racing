@@ -110,7 +110,7 @@ func (t *TurnSignals) playTick() {
 	if err != nil {
 		return
 	}
-	p.SetVolume(0.25)
+	p.SetVolume(0.15)
 	p.Play()
 }
 
@@ -126,7 +126,7 @@ func genTickWav(rate int) []byte {
 		env := attack * decay
 		// один низкий тон с лёгкой призвуковой октавой — без резкого верха
 		s := math.Sin(2*math.Pi*420*ts)*0.8 + math.Sin(2*math.Pi*840*ts)*0.12
-		samples[i] = int16(s * env * 0.10 * 32767) // тихо: 0.10 вместо 0.18
+		samples[i] = int16(s * env * 0.08 * 32767)
 	}
 	return wavMono16(samples, rate)
 }

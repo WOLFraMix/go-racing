@@ -11,13 +11,16 @@ import (
 // sampleRate — частота аудиоконтекста Ebitengine всегда 44100.
 const sampleRate = 44100
 
+const musicVol = 0.25
+
+var trackNames = [...]string{"SYNTHWAVE", "CHILL", "RUSH", "RETRO", "LOFI"}
+
 // AudioSys — синтез звука без аудиофайлов.
 type AudioSys struct {
 	ctx    *audio.Context
 	engine []*audio.Player // 6 слоёв «двигателя» разной высоты тона
 
 	crashBuf []byte
-	musicBuf []byte
 
 	lastGear   int
 	shiftTimer float64
@@ -29,7 +32,12 @@ type AudioSys struct {
 
 	siren *audio.Player
 
-	music *audio.Player
+	music *audio.Player // активная дорожка
+
+	tracks    []*audio.Player
+	musicBufs [][]byte
+	trackIdx  int
+	muted     bool
 }
 
 func NewAudio() *AudioSys {
@@ -53,30 +61,73 @@ func NewAudio() *AudioSys {
 		sp.SetVolume(0)
 		sp.Play()
 		a.siren = sp
-		a.musicBuf = genMusic(sampleRate)
-		buf := a.musicBuf
-		loop := audio.NewInfiniteLoop(bytes.NewReader(buf), int64(len(buf)))
-		if mp, err := a.ctx.NewPlayer(loop); err == nil {
-			mp.SetVolume(0.25)
-			mp.Play()
-			a.music = mp
-		}
 		a.hornBuf = genHorn(sampleRate)
+
+		a.musicBufs = [][]byte{
+			genMusic(sampleRate),
+			genMusicChill(sampleRate),
+			genMusicDrive(sampleRate),
+			genMusicRetro(sampleRate),
+			genMusicLofi(sampleRate),
+		}
+
+		for i, mb := range a.musicBufs {
+			loop := audio.NewInfiniteLoop(bytes.NewReader(mb), int64(len(mb)))
+			mp, err := a.ctx.NewPlayer(loop)
+			if err != nil {
+				continue
+			}
+			mp.SetVolume(0)
+			if i == a.trackIdx {
+				mp.SetVolume(musicVol)
+				mp.Play()
+			}
+			a.tracks = append(a.tracks, mp)
+		}
+		if len(a.tracks) > 0 {
+			a.music = a.tracks[0]
+		}
 	}
 	return a
 }
 
-// SetMusic — фоновая музыка играет всегда, mute только глушит её.
+// SetMusic — играет активная дорожка, mute только глушит её.
 func (a *AudioSys) SetMusic(muted bool) {
+	a.muted = muted
 	if a.music == nil {
 		return
 	}
 	if muted {
 		a.music.SetVolume(0)
 	} else {
-		a.music.SetVolume(0.25)
+		a.music.SetVolume(musicVol)
 	}
 }
+
+// SetTrack — переключение на дорожку idx (0..2) с сохранением мьюта.
+func (a *AudioSys) SetTrack(idx int, muted bool) {
+	a.muted = muted
+	if idx < 0 || idx >= len(trackNames) || idx >= len(a.tracks) {
+		return
+	}
+	if idx == a.trackIdx {
+		return
+	}
+	if a.trackIdx < len(a.tracks) {
+		a.tracks[a.trackIdx].SetVolume(0)
+	}
+	a.trackIdx = idx
+	a.music = a.tracks[idx]
+	if muted {
+		a.music.SetVolume(0)
+	} else {
+		a.music.SetVolume(musicVol)
+	}
+	a.music.Play()
+}
+
+// Track — номер активной дорожки для HUD.
+func (a *AudioSys) Track() int { return a.trackIdx }
 
 // SetSiren — сирена играется, только если включена и не замьючена.
 func (a *AudioSys) SetSiren(on, muted bool) {
@@ -322,6 +373,415 @@ func genMusic(sr int) []byte {
 	copy(orig, s)
 	for i := 0; i < n; i++ {
 		s[i] += 0.22 * orig[(i-d+n)%n]
+	}
+	return toPCM(s)
+}
+
+// genMusicChill — расслабленный луп: тёплый пэд, мягкий бас,
+// деликатная перкуссия, редкие «пианинные» ноты. Fmaj7–Am7–Dm7–G7.
+func genMusicChill(sr int) []byte {
+	const bpm = 82.0
+	beat := 60.0 / bpm
+	bar := 4 * beat
+	dur := 4 * bar
+	n := int(dur * float64(sr))
+	s := make([]float64, n)
+
+	qfreq := func(f float64) float64 { return math.Round(f*dur) / dur }
+	note := func(m float64) float64 {
+		return qfreq(440 * math.Pow(2, (m-69)/12))
+	}
+
+	chords := [][]float64{
+		{53, 57, 60, 64}, // Fmaj7
+		{57, 60, 64, 67}, // Am7
+		{50, 53, 57, 60}, // Dm7
+		{55, 59, 62, 65}, // G7
+	}
+	bassRoot := []float64{29, 33, 26, 31}
+
+	padPh := [4]float64{}
+	padPh2 := [4]float64{}
+	var bassPh, kickPh float64
+	var prevW float64
+
+	for i := 0; i < n; i++ {
+		t := float64(i) / float64(sr)
+		ci := int(t/bar) % 4
+		bi := int(t / beat)
+		bt := math.Mod(t, beat)
+		chordT := math.Mod(t, bar)
+
+		v := 0.0
+
+		// тёплый пэд: медленная атака, две расстроенные волны
+		pEnv := math.Min(1, chordT/0.8) * math.Min(1, (bar-chordT)/0.8) * 0.12
+		for ni, m := range chords[ci] {
+			f := note(m)
+			padPh[ni] += 2 * math.Pi * f / float64(sr)
+			padPh2[ni] += 2 * math.Pi * qfreq(f*1.003) / float64(sr)
+			v += pEnv * (math.Sin(padPh[ni]) + 0.5*math.Sin(padPh2[ni]))
+		}
+
+		// мягкий длинный бас на 1-ю и 3-ю доли
+		if bi%2 == 0 {
+			env := clamp01(bt/0.015) * clamp01((beat*0.9-bt)/0.2)
+			p := bassPh
+			bassPh += 2 * math.Pi * note(bassRoot[ci]) / float64(sr)
+			v += 0.14 * env * (math.Sin(p) + 0.25*math.Sin(2*p))
+		}
+
+		// редкие «пианинные» ноты на сильные доли
+		if bi%2 == 0 {
+			m := chords[ci][(bi/2)%len(chords[ci])] + 12
+			env := math.Exp(-bt / 0.35)
+			fq := note(m)
+			ph := 2 * math.Pi * fq * bt
+			v += 0.07 * env * (math.Sin(ph) + 0.2*math.Sin(2*ph))
+		}
+
+		// мягкая бочка
+		if bt < 0.25 {
+			env := math.Exp(-bt / 0.08)
+			fk := 100.0 - 60.0*bt
+			kickPh += 2 * math.Pi * fk / float64(sr)
+			v += 0.20 * env * math.Sin(kickPh)
+		}
+
+		// «щёточные» хэты на восьмые — тихо и мягко
+		ht := math.Mod(t, beat/2)
+		if ht < 0.04 {
+			env := math.Exp(-ht / 0.018)
+			w := rand.Float64()*2 - 1
+			bright := w - prevW*0.85
+			prevW = w
+			v += 0.028 * env * bright
+		}
+
+		s[i] = v * 0.5
+	}
+
+	// круговое эхо — стык остаётся бесшовным
+	d := int(float64(sr) * beat * 0.5)
+	orig := make([]float64, n)
+	copy(orig, s)
+	for i := 0; i < n; i++ {
+		s[i] += 0.20 * orig[(i-d+n)%n]
+	}
+	return toPCM(s)
+}
+
+// genMusicDrive — энергичный луп: бочка на каждую долю, драйвовый бас
+// с сатурацией, оффбит-стабы и лид-рифф. Am–G–F–E.
+func genMusicDrive(sr int) []byte {
+	const bpm = 132.0
+	beat := 60.0 / bpm
+	bar := 4 * beat
+	dur := 4 * bar
+	n := int(dur * float64(sr))
+	s := make([]float64, n)
+
+	qfreq := func(f float64) float64 { return math.Round(f*dur) / dur }
+	note := func(m float64) float64 {
+		return qfreq(440 * math.Pow(2, (m-69)/12))
+	}
+
+	chords := [][]float64{
+		{57, 60, 64}, // Am
+		{55, 59, 62}, // G
+		{53, 57, 60}, // F
+		{52, 56, 59}, // E
+	}
+	bassRoot := []float64{33, 31, 29, 28}
+
+	var bassPh, kickPh, leadPh float64
+	var prevW float64
+	lastEi := -1
+	leadF := note(57 + 12)
+
+	for i := 0; i < n; i++ {
+		t := float64(i) / float64(sr)
+		ci := int(t/bar) % 4
+		bt := math.Mod(t, beat)
+		ei := int(t / (beat / 2)) // номер восьмой
+		et := math.Mod(t, beat/2)
+
+		v := 0.0
+
+		// бочка на каждую долю — плотная, с сатурацией
+		if bt < 0.2 {
+			env := math.Exp(-bt / 0.045)
+			fk := 105.0 - 60.0*bt
+			kickPh += 2 * math.Pi * fk / float64(sr)
+			v += 0.30 * env * math.Tanh(1.4*math.Sin(kickPh))
+		}
+
+		// драйвовый бас восьмыми с паттерном «1 … 3-4»
+		if ei%4 == 0 || ei%4 == 2 || ei%4 == 3 {
+			env := clamp01(et/0.004) * clamp01((beat/2*0.85-et)/0.05)
+			p := bassPh
+			bassPh += 2 * math.Pi * note(bassRoot[ci]) / float64(sr)
+			w := math.Tanh(1.2 * (math.Sin(p) + 0.4*math.Sin(2*p) + 0.2*math.Sin(3*p)))
+			v += 0.16 * env * w
+		}
+
+		// оффбит-стабы аккорда — «двигатель» грува
+		if et < beat/4 {
+			env := math.Exp(-et / 0.06)
+			for _, m := range chords[ci] {
+				ph := 2 * math.Pi * note(m) * et
+				v += 0.05 * env * (math.Sin(ph) + 0.3*math.Sin(2*ph))
+			}
+		}
+
+		// лид-рифф восьмыми на чётных тактах, октава прыгает
+		if ei != lastEi {
+			lastEi = ei
+			step := []float64{0, 2, 1, 2, 0, 2, 1, 2}[ei%8]
+			m := chords[ci][int(step)] + 12
+			if (ei/4)%2 == 1 {
+				m += 12
+			}
+			leadF = note(m)
+		}
+		lEnv := clamp01(et/0.004) * clamp01((beat/2*0.8-et)/0.06)
+		leadPh += 2 * math.Pi * leadF / float64(sr)
+		w := math.Tanh(0.9 * (math.Sin(leadPh) + 0.25*math.Sin(2*leadPh)))
+		v += 0.07 * lEnv * w
+
+		// хэты: открытый на оффбите, тики на шестнадцатые
+		ht := math.Mod(t, beat/2)
+		if ht < 0.03 {
+			env := math.Exp(-ht / 0.01)
+			w2 := rand.Float64()*2 - 1
+			bright := w2 - prevW*0.8
+			prevW = w2
+			v += 0.055 * env * bright
+		}
+
+		s[i] = v * 0.5
+	}
+
+	d := int(float64(sr) * beat * 0.375)
+	orig := make([]float64, n)
+	copy(orig, s)
+	for i := 0; i < n; i++ {
+		s[i] += 0.18 * orig[(i-d+n)%n]
+	}
+	return toPCM(s)
+}
+
+// genMusicRetro — сухой ретро-поп 80-х: плотный ритм-секшен,
+// октавный бас, короткие аккордные стабы и простой лид без эха.
+// Am–F–G–Am, всё квантовано — стык лупа бесшовный.
+func genMusicRetro(sr int) []byte {
+	const bpm = 122.0
+	beat := 60.0 / bpm
+	bar := 4 * beat
+	dur := 4 * bar
+	n := int(dur * float64(sr))
+	s := make([]float64, n)
+
+	qfreq := func(f float64) float64 { return math.Round(f*dur) / dur }
+	note := func(m float64) float64 {
+		return qfreq(440 * math.Pow(2, (m-69)/12))
+	}
+
+	chords := [][]float64{
+		{57, 60, 64}, // Am
+		{53, 57, 60}, // F
+		{55, 59, 62}, // G
+		{57, 60, 64}, // Am
+	}
+	bassRoot := []float64{33, 29, 31, 33}
+
+	var bassPh, kickPh float64
+	var prevW float64
+	lastEi := -1
+	leadF := note(69)
+	leadPh := 0.0
+
+	for i := 0; i < n; i++ {
+		t := float64(i) / float64(sr)
+		ci := int(t/bar) % 4
+		bt := math.Mod(t, beat)
+		ei := int(t / (beat / 2))
+		et := math.Mod(t, beat/2)
+
+		v := 0.0
+
+		// бас октавами восьмыми — сухой, с лёгким драйвом
+		env := clamp01(et/0.004) * clamp01((beat/2*0.9-et)/0.04)
+		p := bassPh
+		bassPh += 2 * math.Pi * note(bassRoot[ci]) / float64(sr)
+		w := math.Tanh(1.2*math.Sin(p) + 0.35*math.Sin(2*p))
+		if (ei/2)%2 == 1 {
+			w += 0.35 * math.Sin(p*2) // октава вверх на «ан»-долях
+		}
+		v += 0.17 * env * w
+
+		// бочка: пухлый, плотный, на каждую долю
+		if bt < 0.22 {
+			kickPh += 2 * math.Pi * (95.0 - 55.0*bt) / float64(sr)
+			v += 0.28 * math.Exp(-bt/0.06) * math.Sin(kickPh)
+		}
+
+		// снейр на 2 и 4: короткий сухой щелчок без гейта и хвостов
+		if ei%4 == 2 && et < 0.14 {
+			w2 := rand.Float64()*2 - 1
+			bright := w2 - prevW*0.6
+			prevW = w2
+			v += 0.13 * math.Exp(-et/0.03) * (bright + 0.4*math.Sin(2*math.Pi*200*t))
+		}
+
+		// хэты на восьмые: короткие, негромкие
+		if et < 0.03 {
+			w2 := rand.Float64()*2 - 1
+			bright := w2 - prevW*0.8
+			prevW = w2
+			v += 0.035 * math.Exp(-et/0.012) * bright
+		}
+
+		// аккордные стабы: короткие «туд-туд» на 1-ю и «ан» второй восьмой
+		if et < beat/4 {
+			env2 := math.Exp(-et / 0.05)
+			for _, m := range chords[ci] {
+				ph := 2 * math.Pi * note(m) * et
+				v += 0.055 * env2 * (math.Sin(ph) + 0.3*math.Sin(2*ph))
+			}
+		}
+
+		// лид: простая фигурация восьмыми, без вибрато и верхних прыжков
+		if ei != lastEi {
+			lastEi = ei
+			seq := []int{0, 2, 1, 0, 2, 1, 0, 1}
+			m := chords[ci][seq[ei%len(seq)]] + 12
+			leadF = note(m)
+		}
+		leadPh += 2 * math.Pi * leadF / float64(sr)
+		lv := math.Tanh(0.8 * (math.Sin(leadPh) + 0.2*math.Sin(2*leadPh)))
+		v += 0.07 * clamp01(et/0.005) * clamp01((beat/2*0.75-et)/0.05) * lv
+
+		s[i] = v * 0.5
+	}
+
+	// только короткое эхо на пол-восьмой — чуть объёма, без «далека»
+	d := int(float64(sr) * beat * 0.125)
+	orig := make([]float64, n)
+	copy(orig, s)
+	for i := 0; i < n; i++ {
+		s[i] += 0.10 * orig[(i-d+n)%n]
+	}
+	return toPCM(s)
+}
+
+// genMusicLofi — лоу-фай: виниловый шум, мягкий джазовый прогрессинг,
+// раскачка тайминга, «пыльные» барабаны. Am9–Dm9–G7–Cmaj7.
+func genMusicLofi(sr int) []byte {
+	const bpm = 74.0
+	beat := 60.0 / bpm
+	bar := 4 * beat
+	dur := 4 * bar
+	n := int(dur * float64(sr))
+	s := make([]float64, n)
+
+	qfreq := func(f float64) float64 { return math.Round(f*dur) / dur }
+	note := func(m float64) float64 {
+		return qfreq(440 * math.Pow(2, (m-69)/12))
+	}
+
+	chords := [][]float64{
+		{57, 60, 64, 67}, // Am9-подобное: A C E G
+		{50, 53, 57, 60}, // Dm7
+		{55, 59, 62, 65}, // G7
+		{48, 52, 55, 59}, // Cmaj7
+	}
+	bassRoot := []float64{33, 26, 31, 24}
+
+	padPh := [4]float64{}
+	var bassPh, kickPh float64
+	var prevW float64
+
+	// виниловый шелест: медленный шум с редкими щелчками
+	noise := make([]float64, n)
+	last := 0.0
+	for i := 0; i < n; i++ {
+		w := rand.Float64()*2 - 1
+		last = last*0.995 + w*0.005
+		noise[i] = last
+		if rand.Float64() < 1.0/float64(sr)*22 { // ~22 щелчка в секунду
+			noise[i] += (rand.Float64()*2 - 1) * 0.35
+		}
+	}
+
+	for i := 0; i < n; i++ {
+		t := float64(i) / float64(sr)
+		ci := int(t/bar) % 4
+		bi := int(t / beat)
+		bt := math.Mod(t, beat)
+		chordT := math.Mod(t, bar)
+
+		// лоу-фай раскачка: время чуть «гуляет» swing'ом
+		swing := 0.02 * math.Sin(2*math.Pi*float64(bi%2)/2.0)
+		tt := t + swing
+
+		v := 0.0
+
+		// мягкий пэд, почти без атак, тёплые верха срезаны простой фильтрацией
+		pEnv := math.Min(1, chordT/0.6) * math.Min(1, (bar-chordT)/0.6) * 0.10
+		for ni, m := range chords[ci] {
+			p := padPh[ni]
+			padPh[ni] += 2 * math.Pi * note(m) / float64(sr)
+			v += pEnv * (math.Sin(p) + 0.15*math.Sin(2*p))
+		}
+
+		// ленивый бас: нота на 1 и «и» третьей доли
+		if bi == 0 || bi == 2 {
+			env := clamp01(bt/0.02) * clamp01((beat*1.1-bt)/0.3)
+			p := bassPh
+			bassPh += 2 * math.Pi * note(bassRoot[ci]) / float64(sr)
+			v += 0.13 * env * (math.Tanh(0.9*math.Sin(p)) + 0.2*math.Sin(2*p))
+		}
+
+		// «пыльная» бочка на 1 и 3
+		if bi%2 == 0 && bt < 0.3 {
+			kickPh += 2 * math.Pi * (90.0 - 40.0*bt) / float64(sr)
+			v += 0.22 * math.Exp(-bt/0.09) * math.Sin(kickPh)
+		}
+
+		// снейр: мягкий, с шумом и низким телом
+		if bi%2 == 1 && bt < 0.2 {
+			env := math.Exp(-bt / 0.06)
+			w := rand.Float64()*2 - 1
+			v += 0.07 * env * (0.8*w + 0.5*math.Sin(2*math.Pi*170*tt))
+		}
+
+		// редкие хэты: только на «и»
+		if bi%2 == 1 {
+			ht := math.Mod(t, beat)
+			if ht < 0.05 {
+				w := rand.Float64()*2 - 1
+				bright := w - prevW*0.85
+				prevW = w
+				v += 0.03 * math.Exp(-ht/0.02) * bright
+			}
+		}
+
+		s[i] = v*0.55 + 0.05*noise[i] // винил всегда на фоне
+	}
+
+	// лоу-пасс «в один полюс» — приглушить верха, эффект старой записи
+	y := 0.0
+	for i := 0; i < n; i++ {
+		y += 0.22 * (s[i] - y)
+		s[i] = y
+	}
+
+	d := int(float64(sr) * beat * 0.5)
+	orig := make([]float64, n)
+	copy(orig, s)
+	for i := 0; i < n; i++ {
+		s[i] += 0.18 * orig[(i-d+n)%n]
 	}
 	return toPCM(s)
 }

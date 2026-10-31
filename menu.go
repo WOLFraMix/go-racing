@@ -175,11 +175,12 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	hintY := cardsY + listH + 44
 	drawTextCentered(screen, "ENTER — гонка", hintY, 17, color.RGBA{R: 120, G: 255, B: 120, A: 255})
 	drawTextCentered(screen, "TAB — сложность: "+diffNames[g.difficulty], hintY+30, 16, gold)
-	drawTextCentered(screen, "W/S — газ и тормоз, ← → — руль", hintY+54, 14, grey)
-	drawTextCentered(screen, "SPACE — сигнал, у ПАТРИОТа — сирена", hintY+74, 14, grey)
+	drawTextCentered(screen, "W/S — газ и тормоз, ← → — руль, Q/E — поворотники", hintY+54, 14, grey)
+	drawTextCentered(screen, "SPACE — сигнал / сирена", hintY+74, 14, grey)
 	drawTextCentered(screen, "SHIFT — турбо-ускорение", hintY+94, 14, grey)
 	drawTextCentered(screen, "P — пауза, M — звук вкл/выкл", hintY+114, 14, grey)
-	drawTextCentered(screen, fmt.Sprintf("Best: %d", g.highScore), hintY+148, 18,
+	drawTextCentered(screen, "1-5 — музыка: SYNTHWAVE, CHILL, RUSH, RETRO, LOFI", hintY+134, 14, grey)
+	drawTextCentered(screen, fmt.Sprintf("Best: %d", g.highScore), hintY+168, 18,
 		color.RGBA{R: 120, G: 220, B: 255, A: 255})
-	drawTextCentered(screen, "ESC — выход", hintY+180, 14, grey)
+	drawTextCentered(screen, "ESC — выход", hintY+200, 14, grey)
 }
