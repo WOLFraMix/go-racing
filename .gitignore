@@ -1,5 +1,4 @@
 .vscode/
-*.exe
 *.dll
 *.so
 build/
@@ -8,7 +7,6 @@ coverage.out
 instruction.txt
 .env
 /dist/
-*.exe~
 .idea/
 *.swp
 *.log
