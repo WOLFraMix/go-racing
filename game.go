@@ -143,6 +143,9 @@ type Game struct {
 	turbo     float64 // активность турбо 0..1
 	turboHeat float64 // нагрев 0..1: 1 — выдохся, остывает при отпускании
 	turboLock bool    // перегрелся при зажатом Shift — блокировка до отпускания
+
+	weather *WeatherSys
+	effNow  float64 // фактическая скорость мира прошлого кадра — для погоды
 }
 
 // ---------- загрузка спрайтов ----------
@@ -238,6 +241,7 @@ func (g *Game) reset(startStage int) {
 	g.turboHeat = 0
 	g.turboLock = false
 	g.sirenOn = false
+	g.weather = NewWeather()
 	g.audio.SetSiren(false, g.muted)
 	g.scrollSpeed = stageDefs[g.stageIdx].ScrollStart
 	g.readHighScore()
@@ -266,6 +270,7 @@ func (g *Game) Update() error {
 		return g.updateMenu()
 	case StatePlaying:
 		g.updatePlaying()
+		g.weather.Update(1.0/60.0, g.effNow/60.0, g.player.X, g.player.Y)
 	case StatePaused:
 		g.audio.SilenceEngine()
 		g.audio.SetSiren(false, g.muted)
@@ -274,6 +279,7 @@ func (g *Game) Update() error {
 		g.audio.SilenceEngine()
 		g.audio.SetSiren(false, g.muted)
 		g.updateGameOver()
+		g.weather.Update(1.0/60.0, g.effNow/60.0, g.player.X, g.player.Y)
 	}
 	return nil
 }
@@ -284,6 +290,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.drawMenu(screen)
 	default:
 		g.drawWorld(screen)
+		g.weather.Draw(screen)
 		g.drawHUD(screen)
 		if g.banner > 0 {
 			g.drawBanner(screen)
@@ -541,6 +548,9 @@ func (g *Game) updatePlaying() {
 		g.saveSettings()
 		g.audio.SetMusic(g.muted)
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyBackslash) {
+		g.weather.Cycle()
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		// сирена — только у машин с маячками на крыше (ПАТРИОТ)
 		if beaconSkins[g.skinNames[g.skinIdx]] {
@@ -663,6 +673,7 @@ func (g *Game) updatePlaying() {
 	if g.playerBraking {
 		eff *= 0.6
 	}
+	g.effNow = eff // погода знает скорость мира
 
 	// мир едет
 	mark := eff * dt
@@ -866,6 +877,7 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	}
 
 	g.drawScenery(screen, def)
+	g.weather.DrawUnder(screen) // ← лужи лежат на асфальте, под машинами
 
 	// ночь: затемнение, лучи фар и габариты — без порогов, свет
 	// разгорается плавно с первых сумерек. Порог здесь давал вспышку
@@ -901,13 +913,6 @@ func (g *Game) drawWorld(screen *ebiten.Image) {
 	}
 
 	// габариты и стоп-сигналы — после машин, поверх корпуса
-	if dark > 0.001 {
-		for _, e := range g.enemies {
-			drawTailLights(screen, e, e.Braking)
-		}
-		drawTailLights(screen, playerDraw, g.playerBraking)
-	}
-
 	if dark > 0.001 {
 		for _, e := range g.enemies {
 			drawTailLights(screen, e, e.Braking)
