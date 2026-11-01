@@ -14,3 +14,4 @@ Thumbs.db
 .DS_Store
 highscore.json
 settings.json
+*.exe
