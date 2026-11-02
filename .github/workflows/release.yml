@@ -1,0 +1,43 @@
+name: Release
+
+on:
+    push:
+        tags: ["v*"]
+
+permissions:
+    contents: write
+
+jobs:
+    release:
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-go@v5
+              with:
+                  go-version: "1.27"
+                  cache: true
+
+            - name: Сборка exe
+              run: go build -trimpath -ldflags "-s -w" -o GoRacing.exe .
+
+            - name: Упаковка архива
+              shell: pwsh
+              run: |
+                  New-Item -ItemType Directory -Force release | Out-Null
+                  Copy-Item GoRacing.exe release\
+                  Copy-Item -Recurse assets release\
+                  Copy-Item README.md, LICENSE release\
+                  Compress-Archive -Path release\* -DestinationPath GoRacing_windows_x64.zip -Force
+                  Remove-Item -Recurse -Force release
+
+            - name: Создание релиза
+              uses: softprops/action-gh-release@v2
+              with:
+                  name: GoRacing ${{ github.ref_name }}
+                  body: |
+                      Сборка ${{ github.ref_name }}.
+                      Распакуйте архив в любую папку и запустите GoRacing.exe —
+                      рядом должна лежать папка assets из архива.
+                  files: GoRacing_windows_x64.zip
+                  generate_release_notes: true
