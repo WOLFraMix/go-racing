@@ -74,8 +74,7 @@ const (
 	StateGameOver
 )
 
-// spark — искра взрыва. Своя мини-система, чтобы не зависеть от полей
-// Particle из particle.go.
+// spark — искра взрыва.
 type spark struct {
 	X, Y, Vx, Vy    float64
 	Life, Max, Size float64
@@ -88,9 +87,6 @@ type Game struct {
 	player  Car
 	enemies []Car
 	sparks  []spark
-
-	// оставлено для совместимости с particle.go — здесь не используется
-	particles []Particle
 
 	highScore int
 	bonus     int

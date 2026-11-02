@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 )
 
@@ -31,8 +32,14 @@ func (g *Game) readSettings() {
 }
 
 func (g *Game) saveSettings() {
-	data, _ := json.Marshal(settingsFile{Skin: g.skinIdx, Stage: g.startStage, Muted: g.muted, Difficulty: g.difficulty})
-	_ = os.WriteFile("settings.json", data, 0o644)
+	data, err := json.Marshal(settingsFile{Skin: g.skinIdx, Stage: g.startStage, Muted: g.muted, Difficulty: g.difficulty})
+	if err != nil {
+		log.Printf("go-racing: marshal settings: %v", err)
+		return
+	}
+	if err := os.WriteFile("settings.json", data, 0o644); err != nil {
+		log.Printf("go-racing: save settings: %v", err)
+	}
 }
 
 func (g *Game) readHighScore() {
@@ -47,6 +54,12 @@ func (g *Game) readHighScore() {
 }
 
 func (g *Game) saveHighScore() {
-	data, _ := json.Marshal(highScoreFile{HighScore: g.highScore})
-	_ = os.WriteFile("highscore.json", data, 0o644)
+	data, err := json.Marshal(highScoreFile{HighScore: g.highScore})
+	if err != nil {
+		log.Printf("go-racing: marshal highscore: %v", err)
+		return
+	}
+	if err := os.WriteFile("highscore.json", data, 0o644); err != nil {
+		log.Printf("go-racing: save highscore: %v", err)
+	}
 }
